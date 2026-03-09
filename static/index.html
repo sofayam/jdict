@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>jdict</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #000000;
+    --muted: #666666;
+    --border: #dddddd;
+    --accent: #0033bb;
+    --tag-bg: #f0f0f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  header {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  .search-row { display: flex; gap: 8px; align-items: center; }
+  #search {
+    flex: 1;
+    padding: 8px;
+    font-size: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    outline: none;
+  }
+  #search:focus { border-color: var(--text); }
+  #status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  
+  main { padding: 0 10px 40px; }
+  #meta { padding: 8px 0; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  
+  .entry {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .entry-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .kanji { font-size: 20px; font-weight: bold; }
+  .kana { font-size: 14px; color: var(--muted); }
+  
+  .sense { margin-bottom: 6px; }
+  .pos { 
+    font-size: 10px; 
+    font-weight: bold; 
+    text-transform: uppercase; 
+    color: var(--muted); 
+    background: var(--tag-bg);
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-right: 4px;
+  }
+  .glosses { display: inline; }
+  .gloss { display: inline; }
+  .gloss:not(:last-child)::after { content: "; "; }
+  
+  .info { font-size: 12px; color: var(--muted); font-style: italic; margin-top: 2px; }
+  
+  #pagination { display: flex; gap: 20px; padding: 20px 0; justify-content: center; }
+  button { 
+    padding: 8px 16px; 
+    background: var(--tag-bg); 
+    border: 1px solid var(--border); 
+    border-radius: 4px; 
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:disabled { opacity: 0.3; }
+
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  .msg { text-align: center; padding: 40px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="search-row">
+    <input id="search" type="search" placeholder="Search..." autofocus autocomplete="off">
+    <div id="status">...</div>
+  </div>
+</header>
+
+<main>
+  <div id="meta"></div>
+  <div id="results">
+    <div class="msg">Enter text to search</div>
+  </div>
+  <div id="pagination"></div>
+</main>
+
+<script>
+let currentQuery = '';
+let currentOffset = 0;
+let debounce = null;
+const LIMIT = 20;
+
+const searchInput = document.getElementById('search');
+const resultsDiv = document.getElementById('results');
+const metaDiv = document.getElementById('meta');
+const paginationDiv = document.getElementById('pagination');
+const statusDiv = document.getElementById('status');
+
+async function checkStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    statusDiv.textContent = d.ready ? `${d.entry_count.toLocaleString()} words` : 'No DB';
+  } catch(e) { statusDiv.textContent = 'Offline'; }
+}
+
+async function doSearch(q, offset = 0) {
+  if (!q.trim()) {
+    resultsDiv.innerHTML = '<div class="msg">Enter text to search</div>';
+    metaDiv.textContent = '';
+    paginationDiv.innerHTML = '';
+    return;
+  }
+  
+  resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+  
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=${LIMIT}&offset=${offset}`);
+    const data = await r.json();
+    render(data, q, offset);
+  } catch(e) {
+    resultsDiv.innerHTML = '<div class="msg">Search failed</div>';
+  }
+}
+
+function render(data, q, offset) {
+  if (!data.results || data.results.length === 0) {
+    resultsDiv.innerHTML = '<div class="msg">No results</div>';
+    metaDiv.textContent = '';
+    paginationDiv.innerHTML = '';
+    return;
+  }
+
+  metaDiv.textContent = `Found ${data.count || data.results.length} matches`;
+  
+  resultsDiv.innerHTML = data.results.map(e => `
+    <div class="entry">
+      <div class="entry-head">
+        <span class="kanji">${e.kanji[0]?.keb || e.kana[0]?.reb}</span>
+        ${e.kanji[0] ? `<span class="kana">${e.kana[0]?.reb}</span>` : ''}
+      </div>
+      ${e.senses.map((s, i) => `
+        <div class="sense">
+          ${s.pos.length ? `<span class="pos">${s.pos[0]}</span>` : ''}
+          <div class="glosses">
+            ${s.glosses.filter(g => g.lang === 'eng').map(g => `<span class="gloss">${g.text}</span>`).join('')}
+          </div>
+          ${s.s_inf.length ? `<div class="info">${s.s_inf.join('; ')}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+
+  paginationDiv.innerHTML = '';
+  if (offset > 0) {
+    const prev = document.createElement('button');
+    prev.textContent = 'Previous';
+    prev.onclick = () => { currentOffset -= LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
+    paginationDiv.appendChild(prev);
+  }
+  if (data.results.length === LIMIT) {
+    const next = document.createElement('button');
+    next.textContent = 'Next';
+    next.onclick = () => { currentOffset += LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
+    paginationDiv.appendChild(next);
+  }
+}
+
+searchInput.addEventListener('input', e => {
+  const q = e.target.value;
+  currentQuery = q;
+  currentOffset = 0;
+  clearTimeout(debounce);
+  debounce = setTimeout(() => doSearch(q, 0), 300);
+});
+
+checkStatus();
+</script>
+</body>
+</html>

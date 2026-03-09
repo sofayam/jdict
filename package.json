@@ -1,0 +1,25 @@
+{
+  "name": "jdict",
+  "version": "1.0.0",
+  "description": "A locally-hosted Japanese dictionary web service backed by JMdict. Provides a polished web frontend and a clean REST API for other apps.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "import": "node importer.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "express": "^5.2.1",
+    "fast-xml-parser": "^5.4.2",
+    "minimist": "^1.2.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
