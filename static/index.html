@@ -45,9 +45,13 @@
   #meta { padding: 8px 0; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 8px; }
   
   .entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
   }
+  .entry-main-link { flex-grow: 1; }
   .entry-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
   .kanji { font-size: 20px; font-weight: bold; }
   .kana { font-size: 14px; color: var(--muted); }
@@ -83,6 +87,7 @@
   .loading { text-align: center; padding: 40px; color: var(--muted); }
   .msg { text-align: center; padding: 40px; color: var(--muted); }
 
+  a { color: var(--accent); }
   a.entry-link {
     text-decoration: none;
     color: inherit;
@@ -92,6 +97,42 @@
     margin: 1em 0 1em 1em;
     padding-left: 1em;
     border-left: 2px solid var(--border);
+  }
+
+  /* Wiki page styles */
+  .section-header {
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+    margin: 24px 0 8px;
+  }
+  #wiki-form label, #tag-form label {
+    display: block;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+  #wiki-form input, #wiki-form textarea, #tag-form textarea {
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-family: inherit;
+  }
+  #wiki-form textarea, #tag-form textarea {
+    min-height: 200px;
+    line-height: 1.5;
+  }
+  .wiki-index ul {
+    list-style: none;
+    padding-left: 0;
+  }
+  .wiki-index li {
+    padding: 4px 0;
   }
 </style>
 </head>
@@ -110,9 +151,20 @@
     <div class="msg">Enter text to search</div>
   </div>
   <div id="pagination"></div>
+  <datalist id="tags-list"></datalist>
 </main>
 
 <script>
+// Creates a URL- and filename-safe slug from a given text.
+function slugify(text) {
+  return text
+    .toString()
+    .trim()
+    .replace(/[\s\/\?#%&]+/g, '-') // Replace spaces, slashes, etc. with a single hyphen
+    .replace(/[^a-zA-Z0-9\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\u3400-\u4DBF-]+/g, '') // Remove characters not in allowed ranges
+    .replace(/--+/g, '-'); // Replace multiple hyphens with a single hyphen
+}
+
 let currentQuery = '';
 let currentOffset = 0;
 let debounce = null;
@@ -123,6 +175,7 @@ const resultsDiv = document.getElementById('results');
 const metaDiv = document.getElementById('meta');
 const paginationDiv = document.getElementById('pagination');
 const statusDiv = document.getElementById('status');
+const tagsDatalist = document.getElementById('tags-list');
 
 async function checkStatus() {
   try {
@@ -151,6 +204,50 @@ async function doSearch(q, offset = 0) {
   }
 }
 
+async function handleAddToWiki(event, entry) { // Now takes full entry object
+  event.preventDefault();
+  event.stopPropagation();
+
+  const button = event.target;
+  button.textContent = '...';
+  button.disabled = true;
+
+  const wordSlug = slugify(entry.kanji[0]?.keb || entry.kana[0]?.reb);
+  const searchParams = new URLSearchParams(window.location.search);
+  const source = searchParams.get('source') || `search: ${currentQuery}`;
+  const newContext = { source, timestamp: new Date().toISOString() };
+
+  try {
+    const wikiRes = await fetch(`/api/wiki/word/${wordSlug}`);
+    let pageData = { tags: [], notes: '', contexts: [] };
+
+    if (wikiRes.ok) {
+      pageData = await wikiRes.json();
+    }
+    
+    // Add the new lookup context
+    pageData.contexts = [newContext, ...(pageData.contexts || [])];
+
+    // Save the updated page
+    await fetch(`/api/wiki/word/${wordSlug}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pageData),
+    });
+    
+    // Navigate to the page
+    window.location.href = `/wiki/word/${wordSlug}`;
+
+  } catch (e) {
+    console.error('Failed to handle wiki action', e);
+    button.textContent = 'Error';
+    setTimeout(() => {
+      button.textContent = '+ Wiki';
+      button.disabled = false;
+    }, 2000);
+  }
+}
+
 function render(data, q, offset) {
   if (!data.results || data.results.length === 0) {
     resultsDiv.innerHTML = '<div class="msg">No results</div>';
@@ -162,22 +259,27 @@ function render(data, q, offset) {
   metaDiv.textContent = `Found ${data.count || data.results.length} matches`;
   
   resultsDiv.innerHTML = data.results.map(e => `
-    <a href="/entry/${e.seq}" class="entry-link">
-      <div class="entry">
-        <div class="entry-head">
-          <span class="kanji">${e.kanji[0]?.keb || e.kana[0]?.reb}</span>
-          ${e.kanji[0] ? `<span class="kana">${e.kana[0]?.reb}</span>` : ''}
-        </div>
-        ${e.senses.slice(0, 3).map((s, i) => `
-          <div class="sense">
-            ${s.pos.length ? `<span class="pos">${s.pos[0]}</span>` : ''}
-            <div class="glosses">
-              ${s.glosses.filter(g => g.lang === 'eng').map(g => `<span class="gloss">${g.text}</span>`).join('')}
-            </div>
+    <div class="entry">
+      <div class="entry-main-link">
+        <a href="/entry/${e.seq}" class="entry-link">
+          <div class="entry-head">
+            <span class="kanji">${e.kanji[0]?.keb || e.kana[0]?.reb}</span>
+            ${e.kanji[0] ? `<span class="kana">${e.kanji[0]?.keb}</span>` : ''}
           </div>
-        `).join('')}
+          ${e.senses.slice(0, 3).map((s, i) => `
+            <div class="sense">
+              ${s.pos.length ? `<span class="pos">${s.pos[0]}</span>` : ''}
+              <div class="glosses">
+                ${s.glosses.filter(g => g.lang === 'eng').map(g => `<span class="gloss">${g.text}</span>`).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </a>
       </div>
-    </a>
+      <div class="entry-actions">
+        <button onclick="handleAddToWiki(event, ${e.seq})">+ Wiki</button>
+      </div>
+    </div>
   `).join('');
 
   paginationDiv.innerHTML = '';
@@ -196,7 +298,7 @@ function render(data, q, offset) {
 }
 
 function renderSingleEntry(entry) {
-  metaDiv.innerHTML = '';
+  metaDiv.innerHTML = `<a href="/">← Back to search</a>`;
   paginationDiv.innerHTML = '';
   document.querySelector('header').style.display = 'none';
 
@@ -223,12 +325,203 @@ function renderSingleEntry(entry) {
   `;
 }
 
+async function renderWikiPage(wordSlug) { // Changed from seq
+  metaDiv.innerHTML = `<a href="/">← Back to search</a> | <a href="/wiki">Wiki Home</a>`;
+  paginationDiv.innerHTML = '';
+  document.querySelector('header').style.display = 'revert';
+
+  resultsDiv.innerHTML = '<div class="loading">Loading wiki page...</div>';
+
+  try {
+    // Fetch dictionary data and wiki data in parallel
+    const [entryRes, wikiRes] = await Promise.all([
+      // Need to search for the word to get its seq
+      fetch(`/api/search?q=${encodeURIComponent(wordSlug)}&limit=1`),
+      fetch(`/api/wiki/word/${wordSlug}`)
+    ]);
+
+    if (!entryRes.ok) throw new Error('Dictionary entry not found');
+    const searchData = await entryRes.json();
+    if (!searchData.results || searchData.results.length === 0) throw new Error('Dictionary entry not found for wiki word');
+    const entry = searchData.results[0]; // Get the first result
+
+    let wikiData = { tags: [], notes: '', contexts: [] };
+    if (wikiRes.ok) {
+      wikiData = await wikiRes.json();
+    }
+
+    document.title = entry.kanji[0]?.keb || entry.kana[0]?.reb || 'jdict';
+    
+    resultsDiv.innerHTML = `
+      <div class="entry-detail">
+        <div class="section-header">Dictionary Definition</div>
+        <div class="entry-head">
+          <span class="kanji">${entry.kanji.map(k => k.keb).join('、')}</span>
+          <span class="kana">${entry.kana.map(k => k.reb).join('、')}</span>
+        </div>
+      </div>
+
+      <div class="section-header">Wiki Notes</div>
+      <form id="wiki-form">
+        <label for="wiki-tags">Tags</label>
+        <input id="wiki-tags" name="tags" type="text" list="tags-list" value="${(wikiData.tags || []).join(', ')}">
+
+        <label for="wiki-notes">Notes (Markdown supported)</label>
+        <textarea id="wiki-notes" name="notes">${wikiData.notes || ''}</textarea>
+
+        <button type="submit">Save</button>
+      </form>
+    `;
+
+    document.getElementById('wiki-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = e.target.querySelector('button');
+      button.textContent = 'Saving...';
+      button.disabled = true;
+
+      const formData = new FormData(e.target);
+      const notes = formData.get('notes');
+      const tags = formData.get('tags').split(',').map(t => t.trim()).filter(Boolean);
+      
+      try {
+        // We need to preserve existing contexts
+        const existingContexts = wikiData.contexts || [];
+        await fetch(`/api/wiki/word/${wordSlug}`, { // Changed from seq
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes, tags, contexts: existingContexts }),
+        });
+        button.textContent = 'Saved!';
+      } catch (err) {
+        button.textContent = 'Save Failed';
+      } finally {
+        setTimeout(() => {
+          button.textContent = 'Save';
+          button.disabled = false;
+        }, 2000);
+      }
+    });
+
+  } catch (e) {
+    resultsDiv.innerHTML = `<div class="msg">${e.message}</div>`;
+  }
+}
+
+async function renderWikiIndexPage() {
+  metaDiv.innerHTML = `<a href="/">← Back to search</a>`;
+  paginationDiv.innerHTML = '';
+  resultsDiv.innerHTML = '<div class="loading">Loading wiki index...</div>';
+
+  try {
+    const r = await fetch('/api/wiki/index');
+    if (!r.ok) throw new Error('Could not load wiki index.');
+    const indexData = await r.json();
+
+    const renderList = (items, type) => {
+      if (!items || items.length === 0) return '<p>None yet.</p>';
+      const link = type === 'word' ? 'wiki/word' : 'wiki/tag';
+      return '<ul>' + items.map(item => `<li><a href="/${link}/${item.name}">${item.name}</a></li>`).join('') + '</ul>';
+    };
+
+    resultsDiv.innerHTML = `
+      <div class="wiki-index">
+        <h2>Wiki Home</h2>
+        <div class="section-header">Recently Modified Words</div>
+        ${renderList(indexData.wordsByModified, 'word')}
+
+        <div class="section-header">Recently Created Words</div>
+        ${renderList(indexData.wordsByCreated, 'word')}
+
+        <div class="section-header">Recently Modified Tags</div>
+        ${renderList(indexData.tagsByModified, 'tag')}
+
+        <div class="section-header">Recently Created Tags</div>
+        ${renderList(indexData.tagsByCreated, 'tag')}
+      </div>
+    `;
+  } catch (e) {
+    resultsDiv.innerHTML = `<div class="msg">${e.message}</div>`;
+  }
+}
+
+async function renderTagPage(tagName) {
+  metaDiv.innerHTML = `<a href="/wiki">← Back to Wiki Home</a>`;
+  paginationDiv.innerHTML = '';
+  resultsDiv.innerHTML = `<div class="loading">Loading tag page...</div>`;
+
+  try {
+    const r = await fetch(`/api/wiki/tag/${tagName}`);
+    if (!r.ok) throw new Error('Could not load tag page.');
+    const tagData = await r.json();
+
+    document.title = `Tag: ${tagName}`;
+
+    resultsDiv.innerHTML = `
+      <div class="tag-page">
+        <h2>Tag: ${tagName}</h2>
+        
+        <div class="section-header">Notes</div>
+        <form id="tag-form">
+          <textarea name="notes">${tagData.notes || ''}</textarea>
+          <button type="submit">Save Notes</button>
+        </form>
+
+        <div class="section-header">Words with this tag</div>
+        ${tagData.words.map(word => `
+          <div class="entry">
+            <a href="/wiki/word/${word.name}" class="entry-link">${word.name}</a>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    document.getElementById('tag-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = e.target.querySelector('button');
+      button.textContent = 'Saving...';
+      button.disabled = true;
+
+      const formData = new FormData(e.target);
+      const notes = formData.get('notes');
+      
+      try {
+        await fetch(`/api/wiki/tag/${tagName}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        });
+        button.textContent = 'Saved!';
+      } catch (err) {
+        button.textContent = 'Save Failed';
+      } finally {
+        setTimeout(() => {
+          button.textContent = 'Save Notes';
+          button.disabled = false;
+        }, 2000);
+      }
+    });
+
+  } catch (e) {
+    resultsDiv.innerHTML = `<div class="msg">${e.message}</div>`;
+  }
+}
+
+async function populateTagsDatalist() {
+  try {
+    const r = await fetch('/api/wiki/tags');
+    const tags = await r.json();
+    tagsDatalist.innerHTML = tags.map(t => `<option value="${t}"></option>`).join('');
+  } catch (e) {
+    console.error('Could not load tags for autocomplete', e);
+  }
+}
+
 searchInput.addEventListener('input', e => {
   const q = e.target.value;
-  // If we are on an entry page, typing in the search box should
+  // If we are on a page that's not the search page, typing should
   // navigate to a search for that query.
-  if (window.location.pathname.startsWith('/entry/')) {
-    window.location.href = `/${encodeURIComponent(q)}`;
+  if (!window.location.pathname.startsWith('/search/')) {
+    window.location.href = `/search/${encodeURIComponent(q)}`;
     return;
   }
   currentQuery = q;
@@ -241,31 +534,31 @@ async function router() {
   const path = window.location.pathname;
   const parts = path.split('/').filter(Boolean);
 
+  document.querySelector('header').style.display = 'revert';
+
   if (parts[0] === 'entry' && parts[1]) {
-    const seq = parts[1];
-    try {
-      resultsDiv.innerHTML = '<div class="loading">Loading entry...</div>';
-      const r = await fetch(`/api/entry/${seq}`);
-      if (!r.ok) throw new Error('Entry not found');
-      const entry = await r.json();
-      renderSingleEntry(entry);
-      document.title = entry.kanji[0]?.keb || entry.kana[0]?.reb || 'jdict';
-    } catch (e) {
-      resultsDiv.innerHTML = `<div class="msg">${e.message}</div>`;
-    }
-  } else if (parts.length === 1 && parts[0] !== 'static') {
-    const word = decodeURIComponent(parts[0]);
+    renderSingleEntry(await (await fetch(`/api/entry/${parts[1]}`)).json());
+  } else if (parts[0] === 'wiki' && parts.length === 1) {
+    renderWikiIndexPage();
+  } else if (parts[0] === 'wiki' && parts[1] === 'word' && parts[2]) {
+    renderWikiPage(parts[2]);
+  } else if (parts[0] === 'wiki' && parts[1] === 'tag' && parts[2]) {
+    renderTagPage(parts[2]);
+  } else if (parts[0] === 'search' && parts[1]) {
+    const word = decodeURIComponent(parts[1]);
     searchInput.value = word;
     doSearch(word, 0);
     const len = searchInput.value.length;
     searchInput.focus();
     searchInput.setSelectionRange(len, len);
   } else {
+    metaDiv.innerHTML = '<span><a href="/wiki">Wiki Home</a></span>';
     resultsDiv.innerHTML = '<div class="msg">Enter text to search</div>';
     checkStatus();
   }
 }
 
+populateTagsDatalist();
 router();
 </script>
 </body>

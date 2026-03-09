@@ -27,7 +27,7 @@ the following concepts can be defined
 - tags
 - images
 - notes
-- contexts (this will be a time when a search occurred and the context)
+- contexts (this will be a time when a search occurred and the source)
 yaml is probably NOT suitable as it is not easy enough to write. json has too many quotation marks. we will think of something.
 
 
@@ -47,3 +47,6 @@ while the wiki will be built by repeated use of the dictionary lookup function a
 - most recently created tags
 - most recently edited tags
 
+## browsing experience
+
+whenever the user views a page he can edit it, adding tags and altering the image or the content of the notes. Adding a tag makes strong use of autocomplete so that once a tag has been defined it is easy to reuse in other places. Adding images uses state of the art browser technology to make this easy on mobile platforms.

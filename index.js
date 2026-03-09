@@ -6,9 +6,12 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const database = require('./db');
+const wiki = require('./wiki');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+app.use(express.json());
 
 // Middleware to ensure UTF-8 for JSON responses (API only)
 app.use('/api', (req, res, next) => {
@@ -141,12 +144,106 @@ app.get('/api/random', (req, res) => {
   res.json({ results: database.randomEntries(n) });
 });
 
+// ─────────────────────────────────────────────
+// Wiki
+// ─────────────────────────────────────────────
+
+app.get('/api/wiki/index', async (req, res) => {
+  try {
+    const indexData = await wiki.getWikiIndexData();
+    res.json(indexData);
+  } catch (error) {
+    console.error('Failed to get wiki index:', error);
+    res.status(500).json({ error: 'Failed to get wiki index' });
+  }
+});
+
+app.get('/api/wiki/tags', async (req, res) => {
+  try {
+    const tags = await wiki.getAllTags();
+    res.json(tags);
+  } catch (error) {
+    console.error('Failed to get wiki tags:', error);
+    res.status(500).json({ error: 'Failed to get wiki tags' });
+  }
+});
+
+app.get('/api/wiki/word/:word', async (req, res) => {
+  try {
+    const page = await wiki.getWordPage(req.params.word);
+    if (page) {
+      res.json(page);
+    } else {
+      // This is not an error, it just means no page has been created yet.
+      res.status(404).json({ error: 'Wiki page not found' });
+    }
+  } catch (error)
+ {
+    console.error(`Failed to get wiki page for word ${req.params.word}:`, error);
+    res.status(500).json({ error: 'Failed to get wiki page' });
+  }
+});
+
+app.post('/api/wiki/word/:word', async (req, res) => {
+  try {
+    await wiki.saveWordPage(req.params.word, req.body);
+    res.status(201).json({ status: 'ok' });
+  } catch (error) {
+    console.error(`Failed to save wiki page for word ${req.params.word}:`, error);
+    res.status(500).json({ error: 'Failed to save wiki page' });
+  }
+});
+
+app.get('/api/wiki/tag/:name', async (req, res) => {
+  try {
+    const tagName = req.params.name;
+    const [tagPage, words] = await Promise.all([
+      wiki.getTagPage(tagName),
+      wiki.getWordsForTag(tagName)
+    ]);
+
+    if (!tagPage) {
+      return res.status(404).json({ error: 'Tag page not found' });
+    }
+
+    res.json({ ...tagPage, words });
+  } catch (error) {
+    console.error(`Failed to get tag page for tag ${req.params.name}:`, error);
+    res.status(500).json({ error: 'Failed to get tag page' });
+  }
+});
+
+app.post('/api/wiki/tag/:name', async (req, res) => {
+  try {
+    await wiki.saveTagPage(req.params.name, req.body);
+    res.status(201).json({ status: 'ok' });
+  } catch (error) {
+    console.error(`Failed to save tag page for tag ${req.params.name}:`, error);
+    res.status(500).json({ error: 'Failed to save tag page' });
+  }
+});
+
 app.get('/entry/:seq', (req, res) => {
   // Client-side router will handle rendering the entry.
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 
-app.get('/:word', (req, res, next) => {
+app.get('/wiki/word/:word', (req, res) => {
+  // Client-side router will handle rendering the wiki page.
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki', (req, res) => {
+  // Client-side router will handle rendering the wiki index.
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/tag/:name', (req, res) => {
+  // Client-side router will handle rendering the tag page.
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/search/:word', (req, res, next) => {
   const { word } = req.params;
   // Avoid treating file requests (like favicon.ico) as search terms.
   if (word.includes('.')) {
