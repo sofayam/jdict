@@ -7,9 +7,37 @@ const path = require('path');
 const fs = require('fs');
 const database = require('./db');
 const wiki = require('./wiki');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+
+// Multer configuration for image uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, 'wiki', 'images'));
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = uuidv4();
+    const fileExtension = path.extname(file.originalname);
+    cb(null, `${uniqueSuffix}${fileExtension}`);
+  }
+});
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif/;
+    const mimetype = allowedTypes.test(file.mimetype);
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+    cb(new Error('Only images (jpeg, jpg, png, gif) are allowed'));
+  }
+});
 
 app.use(express.json());
 
@@ -221,6 +249,13 @@ app.post('/api/wiki/tag/:name', async (req, res) => {
     console.error(`Failed to save tag page for tag ${req.params.name}:`, error);
     res.status(500).json({ error: 'Failed to save tag page' });
   }
+});
+
+app.post('/api/wiki/image-upload', upload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  res.json({ filename: req.file.filename });
 });
 
 app.get('/entry/:seq', (req, res) => {

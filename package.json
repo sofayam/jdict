@@ -19,7 +19,9 @@
     "fast-xml-parser": "^5.4.2",
     "gray-matter": "^4.0.3",
     "marked": "^17.0.4",
-    "minimist": "^1.2.8"
+    "minimist": "^1.2.8",
+    "multer": "^2.1.1",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

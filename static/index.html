@@ -134,6 +134,20 @@
   .wiki-index li {
     padding: 4px 0;
   }
+  .image-upload-section {
+    margin-bottom: 12px;
+  }
+  .image-upload-section input[type="file"] {
+    width: auto;
+    margin-right: 8px;
+  }
+  .image-preview {
+    max-width: 100%;
+    height: auto;
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    padding: 4px;
+  }
 </style>
 </head>
 <body>
@@ -219,7 +233,7 @@ async function handleAddToWiki(event, entry) { // Now takes full entry object
 
   try {
     const wikiRes = await fetch(`/api/wiki/word/${wordSlug}`);
-    let pageData = { tags: [], notes: '', contexts: [] };
+    let pageData = { tags: [], notes: '', contexts: [], image: '' };
 
     if (wikiRes.ok) {
       pageData = await wikiRes.json();
@@ -345,7 +359,7 @@ async function renderWikiPage(wordSlug) { // Changed from seq
     if (!searchData.results || searchData.results.length === 0) throw new Error('Dictionary entry not found for wiki word');
     const entry = searchData.results[0]; // Get the first result
 
-    let wikiData = { tags: [], notes: '', contexts: [] };
+    let wikiData = { tags: [], notes: '', contexts: [], image: '' };
     if (wikiRes.ok) {
       wikiData = await wikiRes.json();
     }
@@ -369,19 +383,66 @@ async function renderWikiPage(wordSlug) { // Changed from seq
         <label for="wiki-notes">Notes (Markdown supported)</label>
         <textarea id="wiki-notes" name="notes">${wikiData.notes || ''}</textarea>
 
+        <div class="image-upload-section">
+          <label for="image-file">Image</label>
+          <input type="file" id="image-file" accept="image/*">
+          <button type="button" id="upload-image-button">Upload Image</button>
+          <input type="hidden" id="image-filename" name="image" value="${wikiData.image || ''}">
+          <div id="image-preview-container">
+            ${wikiData.image ? `<img src="/wiki/images/${wikiData.image}" class="image-preview">` : ''}
+          </div>
+        </div>
+
         <button type="submit">Save</button>
       </form>
     `;
 
+    const imageFile = document.getElementById('image-file');
+    const uploadImageButton = document.getElementById('upload-image-button');
+    const imageFilenameInput = document.getElementById('image-filename');
+    const imagePreviewContainer = document.getElementById('image-preview-container');
+
+    uploadImageButton.addEventListener('click', async () => {
+      if (!imageFile.files.length) {
+        alert('Please select an image to upload.');
+        return;
+      }
+      const file = imageFile.files[0];
+      const formData = new FormData();
+      formData.append('image', file);
+
+      uploadImageButton.textContent = 'Uploading...';
+      uploadImageButton.disabled = true;
+
+      try {
+        const res = await fetch('/api/wiki/image-upload', {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) throw new Error('Image upload failed');
+        const data = await res.json();
+        imageFilenameInput.value = data.filename;
+        imagePreviewContainer.innerHTML = `<img src="/wiki/images/${data.filename}" class="image-preview">`;
+        alert('Image uploaded successfully!');
+      } catch (err) {
+        console.error('Image upload error:', err);
+        alert(`Image upload failed: ${err.message}`);
+      } finally {
+        uploadImageButton.textContent = 'Upload Image';
+        uploadImageButton.disabled = false;
+      }
+    });
+
     document.getElementById('wiki-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const button = e.target.querySelector('button');
+      const button = e.target.querySelector('button[type="submit"]');
       button.textContent = 'Saving...';
       button.disabled = true;
 
       const formData = new FormData(e.target);
       const notes = formData.get('notes');
       const tags = formData.get('tags').split(',').map(t => t.trim()).filter(Boolean);
+      const image = formData.get('image'); // Get the filename from the hidden input
       
       try {
         // We need to preserve existing contexts
@@ -389,7 +450,7 @@ async function renderWikiPage(wordSlug) { // Changed from seq
         await fetch(`/api/wiki/word/${wordSlug}`, { // Changed from seq
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes, tags, contexts: existingContexts }),
+          body: JSON.stringify({ notes, tags, contexts: existingContexts, image }),
         });
         button.textContent = 'Saved!';
       } catch (err) {

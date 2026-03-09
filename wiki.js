@@ -9,6 +9,19 @@ const matter = require('gray-matter');
 const WIKI_PATH = path.join(__dirname, 'wiki');
 const WORDS_PATH = path.join(WIKI_PATH, 'words');
 const TAGS_PATH = path.join(WIKI_PATH, 'tags');
+const IMAGES_PATH = path.join(WIKI_PATH, 'images'); // Added IMAGES_PATH
+
+/**
+ * Ensures that the necessary wiki directories exist.
+ */
+async function ensureWikiDirectories() {
+  await fs.mkdir(WORDS_PATH, { recursive: true });
+  await fs.mkdir(TAGS_PATH, { recursive: true });
+  await fs.mkdir(IMAGES_PATH, { recursive: true });
+}
+
+// Call it once when the module loads
+ensureWikiDirectories().catch(console.error);
 
 /**
  * Creates a URL- and filename-safe slug from a given text.
