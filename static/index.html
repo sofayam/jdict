@@ -82,6 +82,17 @@
 
   .loading { text-align: center; padding: 40px; color: var(--muted); }
   .msg { text-align: center; padding: 40px; color: var(--muted); }
+
+  a.entry-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .entry-detail .sense {
+    margin: 1em 0 1em 1em;
+    padding-left: 1em;
+    border-left: 2px solid var(--border);
+  }
 </style>
 </head>
 <body>
@@ -151,47 +162,111 @@ function render(data, q, offset) {
   metaDiv.textContent = `Found ${data.count || data.results.length} matches`;
   
   resultsDiv.innerHTML = data.results.map(e => `
-    <div class="entry">
-      <div class="entry-head">
-        <span class="kanji">${e.kanji[0]?.keb || e.kana[0]?.reb}</span>
-        ${e.kanji[0] ? `<span class="kana">${e.kana[0]?.reb}</span>` : ''}
-      </div>
-      ${e.senses.map((s, i) => `
-        <div class="sense">
-          ${s.pos.length ? `<span class="pos">${s.pos[0]}</span>` : ''}
-          <div class="glosses">
-            ${s.glosses.filter(g => g.lang === 'eng').map(g => `<span class="gloss">${g.text}</span>`).join('')}
-          </div>
-          ${s.s_inf.length ? `<div class="info">${s.s_inf.join('; ')}</div>` : ''}
+    <a href="/entry/${e.seq}" class="entry-link">
+      <div class="entry">
+        <div class="entry-head">
+          <span class="kanji">${e.kanji[0]?.keb || e.kana[0]?.reb}</span>
+          ${e.kanji[0] ? `<span class="kana">${e.kana[0]?.reb}</span>` : ''}
         </div>
-      `).join('')}
-    </div>
+        ${e.senses.slice(0, 3).map((s, i) => `
+          <div class="sense">
+            ${s.pos.length ? `<span class="pos">${s.pos[0]}</span>` : ''}
+            <div class="glosses">
+              ${s.glosses.filter(g => g.lang === 'eng').map(g => `<span class="gloss">${g.text}</span>`).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </a>
   `).join('');
 
   paginationDiv.innerHTML = '';
   if (offset > 0) {
     const prev = document.createElement('button');
     prev.textContent = 'Previous';
-    prev.onclick = () => { currentOffset -= LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
+    prev.onclick = (ev) => { ev.preventDefault(); currentOffset -= LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
     paginationDiv.appendChild(prev);
   }
   if (data.results.length === LIMIT) {
     const next = document.createElement('button');
     next.textContent = 'Next';
-    next.onclick = () => { currentOffset += LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
+    next.onclick = (ev) => { ev.preventDefault(); currentOffset += LIMIT; doSearch(q, currentOffset); window.scrollTo(0,0); };
     paginationDiv.appendChild(next);
   }
 }
 
+function renderSingleEntry(entry) {
+  metaDiv.innerHTML = '';
+  paginationDiv.innerHTML = '';
+  document.querySelector('header').style.display = 'none';
+
+  resultsDiv.innerHTML = `
+    <div class="entry-detail">
+      <div class="entry-head">
+        <span class="kanji">${entry.kanji.map(k => k.keb).join('、')}</span>
+      </div>
+      <div class="entry-head">
+        <span class="kana">${entry.kana.map(k => k.reb).join('、')}</span>
+      </div>
+      
+      ${entry.senses.map(s => `
+        <div class="sense">
+          <p>
+            ${s.pos.length ? `<em>(${s.pos.join(', ')})</em>` : ''}
+            ${s.glosses.filter(g => g.lang === 'eng').map(g => g.text).join('; ')}
+          </p>
+          ${s.s_inf.length ? `<p class="info">${s.s_inf.join('; ')}</p>` : ''}
+          ${s.dial.length ? `<p class="info">Dialect: ${s.dial.join(', ')}</p>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 searchInput.addEventListener('input', e => {
   const q = e.target.value;
+  // If we are on an entry page, typing in the search box should
+  // navigate to a search for that query.
+  if (window.location.pathname.startsWith('/entry/')) {
+    window.location.href = `/${encodeURIComponent(q)}`;
+    return;
+  }
   currentQuery = q;
   currentOffset = 0;
   clearTimeout(debounce);
   debounce = setTimeout(() => doSearch(q, 0), 300);
 });
 
-checkStatus();
+async function router() {
+  const path = window.location.pathname;
+  const parts = path.split('/').filter(Boolean);
+
+  if (parts[0] === 'entry' && parts[1]) {
+    const seq = parts[1];
+    try {
+      resultsDiv.innerHTML = '<div class="loading">Loading entry...</div>';
+      const r = await fetch(`/api/entry/${seq}`);
+      if (!r.ok) throw new Error('Entry not found');
+      const entry = await r.json();
+      renderSingleEntry(entry);
+      document.title = entry.kanji[0]?.keb || entry.kana[0]?.reb || 'jdict';
+    } catch (e) {
+      resultsDiv.innerHTML = `<div class="msg">${e.message}</div>`;
+    }
+  } else if (parts.length === 1 && parts[0] !== 'static') {
+    const word = decodeURIComponent(parts[0]);
+    searchInput.value = word;
+    doSearch(word, 0);
+    const len = searchInput.value.length;
+    searchInput.focus();
+    searchInput.setSelectionRange(len, len);
+  } else {
+    resultsDiv.innerHTML = '<div class="msg">Enter text to search</div>';
+    checkStatus();
+  }
+}
+
+router();
 </script>
 </body>
 </html>
