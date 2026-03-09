@@ -65,26 +65,24 @@ function search(q, lang = 'eng', limit = 20, offset = 0) {
 
   if (_isJapanese(q)) {
     const exactPattern = `% ${q} %`;
-    // Try exact word match in the space-separated list first
-    // We pad with spaces to ensure we match the full word
-    rows = db.prepare(`
-      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt
-      FROM entries e
-      JOIN entries_text t ON t.seq = e.seq
-      WHERE (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?)
-      LIMIT ? OFFSET ?
-    `).all(exactPattern, exactPattern, limit, offset);
+    const prefixPattern = `${q}%`;
 
-    if (rows.length === 0) {
-      // Fallback: Substring match on the plain-text entries_text table
-      rows = db.prepare(`
-        SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt
-        FROM entries e
-        JOIN entries_text t ON t.seq = e.seq
-        WHERE t.kanji LIKE ? OR t.kana LIKE ?
-        LIMIT ? OFFSET ?
-      `).all(`%${q}%`, `%${q}%`, limit, offset);
-    }
+    // Unified query for exact and prefix matches.
+    // Exact matches are prioritized.
+    rows = db.prepare(`
+      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt, 1 as priority
+      FROM entries e JOIN entries_text t ON t.seq = e.seq
+      WHERE (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?)
+      
+      UNION
+      
+      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt, 2 as priority
+      FROM entries e JOIN entries_text t ON t.seq = e.seq
+      WHERE (t.kanji LIKE ?) OR (t.kana LIKE ?)
+      
+      ORDER BY priority, e.seq
+      LIMIT ? OFFSET ?
+    `).all(exactPattern, exactPattern, prefixPattern, prefixPattern, limit, offset);
   } else {
     // FTS5 full-text search on English glosses
     // We try exact matches first for higher precision

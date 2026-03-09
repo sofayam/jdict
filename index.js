@@ -141,6 +141,53 @@ app.get('/api/random', (req, res) => {
   res.json({ results: database.randomEntries(n) });
 });
 
+app.get('/:word', (req, res, next) => {
+  /**
+   * Pre-fills the search input with a word from the URL and triggers a search.
+   * e.g. /<word> will search for "word".
+   */
+  const { word } = req.params;
+
+  // Avoid treating file requests (like favicon.ico) as search terms.
+  if (word.includes('.')) {
+    return next();
+  }
+
+  const indexPath = path.join(__dirname, 'static', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, htmlData) => {
+    if (err) {
+      console.error('Error reading index.html:', err);
+      return res.status(500).send('Error loading page');
+    }
+
+    // Inject the word into the search input value.
+    const safeWord = word.replace(/"/g, '&quot;');
+    const modifiedHtml = htmlData
+      .replace(
+        'autocomplete="off">',
+        `autocomplete="off" value="${safeWord}">`
+      )
+      .replace(
+        '</body>',
+        `
+<script>
+  window.addEventListener('load', () => {
+    const searchInput = document.getElementById('search');
+    if (searchInput.value) {
+      doSearch(searchInput.value, 0);
+      // Move cursor to the end of the input
+      const len = searchInput.value.length;
+      searchInput.focus();
+      searchInput.setSelectionRange(len, len);
+    }
+  });
+</script>
+</body>`
+      );
+    res.send(modifiedHtml);
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`jdict-service running at http://localhost:${PORT}`);
 });
