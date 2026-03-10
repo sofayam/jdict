@@ -9,6 +9,7 @@ the purpose of the wiki is to record selected words which have been looked up, c
 the word page contains the following information
 
 - how often the word has been looked up and from what sources (the source will be sent as part of the search url, just treat it as a string for the time being, though it will probably itself be a url)
+- meaning in english copied from the dictionary lookup
 - additional notes, written in markup 
 - tags assignable by the user
 - an optional image, copied in by the user using drag and drop, ideally straight from another web page (not sure if this is even possible but it would be nice)

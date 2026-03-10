@@ -49,6 +49,8 @@ app.use('/api', (req, res, next) => {
 
 // Serve static files (the frontend)
 app.use('/static', express.static(path.join(__dirname, 'static')));
+// Serve wiki images
+app.use('/wiki/images', express.static(path.join(__dirname, 'wiki', 'images')));
 
 // ─────────────────────────────────────────────
 // Frontend
