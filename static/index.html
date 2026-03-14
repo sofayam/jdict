@@ -362,7 +362,7 @@ function makeTagWidget(container, initialTags, onChange) {
 
 // ─── Image drop zone widget ───────────────────────────────────────────────────
 
-function makeDropZone(zone, initialFilename) {
+function makeDropZone(zone, initialFilename, onChange) {
   let current = initialFilename || '';
 
   function showEmpty() {
@@ -378,7 +378,7 @@ function makeDropZone(zone, initialFilename) {
       <div class="dz-hint">Click or drop to replace &nbsp;·&nbsp; <span class="dz-remove">Remove</span></div>
       <input type="file" accept="image/*">
     `;
-    zone.querySelector('.dz-remove').addEventListener('click', e => { e.stopPropagation(); showEmpty(); });
+    zone.querySelector('.dz-remove').addEventListener('click', e => { e.stopPropagation(); showEmpty(); onChange?.(); });
     bindFileInput();
   }
 
@@ -402,6 +402,7 @@ function makeDropZone(zone, initialFilename) {
       if (!res.ok) throw new Error();
       const { filename } = await res.json();
       showImage(filename);
+      onChange?.();
     } catch {
       alert('Image upload failed');
       prev ? showImage(prev) : showEmpty();
@@ -652,8 +653,8 @@ async function renderWikiWordPage(slug) {
     }
   }
 
-  const tagWidget = makeTagWidget(document.getElementById('tag-box'), wiki.tags || [], save);
-  const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '');
+  const tagWidget = makeTagWidget(document.getElementById('tag-box'), wiki.tags || [], markDirty);
+  const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '', markDirty);
 
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
 
@@ -695,7 +696,7 @@ async function renderWikiTagPage(tagName) {
     </div>
   `;
 
-  const dropZone  = makeDropZone(document.getElementById('drop-zone'), tag.image || '');
+  const dropZone  = makeDropZone(document.getElementById('drop-zone'), tag.image || '', markDirty);
   const statusEl  = document.getElementById('save-status');
   const saveBtn   = document.getElementById('tag-save-btn');
 
