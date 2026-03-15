@@ -147,6 +147,22 @@
   .save-status { font-size: 12px; color: var(--muted); }
   .save-status.dirty { color: #c05000; font-weight: bold; }
 
+  /* Edit mode toggle */
+  .section-label-row { display: flex; align-items: center; justify-content: space-between; }
+  .quill-btn { background: none; border: none; cursor: pointer; font-size: 22px; padding: 0 2px; opacity: 0.35; line-height: 1; }
+  .quill-btn:hover, .quill-btn.active { opacity: 1; }
+
+  /* View mode: fields locked down */
+  .wiki-form.view-mode textarea { background: transparent; border-color: transparent; resize: none; cursor: default; color: var(--text); }
+  .wiki-form.view-mode .tag-text-input { display: none; }
+  .wiki-form.view-mode .lozenge-x { display: none; }
+  .wiki-form.view-mode .drop-zone { pointer-events: none; border-color: transparent; padding: 0; }
+  .wiki-form.view-mode .image-section:has(.drop-zone.dz-empty) { display: none; }
+  .wiki-form.view-mode .dz-hint { display: none; }
+
+  /* Save button: only shown when dirty, always red */
+  button.save-dirty { background: #c00; color: #fff; border-color: #c00; }
+
   /* Tag lozenge input */
   .tag-box {
     border: 1px solid var(--border);
@@ -179,6 +195,8 @@
     gap: 4px;
     white-space: nowrap;
   }
+  .lozenge-link { color: inherit; text-decoration: none; }
+  .lozenge-link:hover { text-decoration: underline; }
   .lozenge-x {
     cursor: pointer;
     color: var(--muted);
@@ -295,7 +313,15 @@ let debounceTimer = null;
 const LIMIT = 20;
 
 // Capture source context from the calling app (e.g. podcast player URL)
-const pageSource = new URLSearchParams(window.location.search).get('source') || '';
+const _qs = new URLSearchParams(window.location.search);
+const pageSource   = _qs.get('source')    || '';
+const podcastName  = _qs.get('podcast')   || '';
+const podcastTs    = _qs.get('timestamp') || '';
+// Episode names often arrive as URL path segments (e.g. "%2315「…」") — decode once more
+// to convert any residual %-sequences into real characters before storing.
+const _epRaw = _qs.get('episode') || '';
+let podcastEp = _epRaw;
+try { podcastEp = decodeURIComponent(_epRaw); } catch { /* leave as-is if malformed */ }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
@@ -326,7 +352,7 @@ function makeTagWidget(container, initialTags, onChange) {
     tags.forEach(tag => {
       const el = document.createElement('span');
       el.className = 'lozenge';
-      el.innerHTML = `<span>${tag}</span><span class="lozenge-x" data-tag="${tag}">×</span>`;
+      el.innerHTML = `<a class="lozenge-link" href="/wiki/tag/${encodeURIComponent(tag)}">${tag}</a><span class="lozenge-x" data-tag="${tag}">×</span>`;
       container.insertBefore(el, input);
     });
   }
@@ -336,6 +362,12 @@ function makeTagWidget(container, initialTags, onChange) {
       tags = tags.filter(t => t !== e.target.dataset.tag);
       renderLozenges();
       onChange?.();
+    } else if (e.target.closest('a')) {
+      // In edit mode, suppress navigation and focus the input instead
+      if (!container.closest('form')?.classList.contains('view-mode')) {
+        e.preventDefault();
+        container.querySelector('.tag-text-input').focus();
+      }
     } else {
       container.querySelector('.tag-text-input').focus();
     }
@@ -367,12 +399,14 @@ function makeDropZone(zone, initialFilename, onChange) {
 
   function showEmpty() {
     current = '';
+    zone.classList.add('dz-empty');
     zone.innerHTML = `<div>Drop an image here or click to select</div><input type="file" accept="image/*">`;
     bindFileInput();
   }
 
   function showImage(filename) {
     current = filename;
+    zone.classList.remove('dz-empty');
     zone.innerHTML = `
       <img src="/wiki/images/${filename}" alt="">
       <div class="dz-hint">Click or drop to replace &nbsp;·&nbsp; <span class="dz-remove">Remove</span></div>
@@ -447,10 +481,14 @@ function renderSearchResults(data, q, offset) {
     return;
   }
 
+  const podParams = podcastName
+    ? `?podcast=${encodeURIComponent(podcastName)}&episode=${encodeURIComponent(podcastEp)}&timestamp=${encodeURIComponent(podcastTs)}`
+    : '';
+
   resultsDiv.innerHTML = data.results.map(e => `
     <div class="entry">
       <div class="entry-main-link">
-        <a class="entry-link" href="/entry/${e.seq}">
+        <a class="entry-link" href="/entry/${e.seq}${podParams}">
           <div class="entry-head">
             <span class="kanji">${primaryForm(e)}</span>
             ${readingForm(e) ? `<span class="kana">${readingForm(e)}</span>` : ''}
@@ -495,6 +533,19 @@ async function renderEntryPage(seq) {
   const wikiRes = await fetch(`/api/wiki/word/${slug}`);
   const hasWiki = wikiRes.ok;
 
+  // If this lookup came from a podcast, silently append a context to the existing wiki page
+  if (hasWiki && podcastName) {
+    const existing = await wikiRes.json();
+    const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString(),
+                  podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs };
+    existing.contexts = [...(existing.contexts || []), ctx];
+    fetch(`/api/wiki/word/${slug}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(existing),
+    });
+  }
+
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
@@ -518,7 +569,7 @@ async function addToWiki(entry) {
 
   const slug = slugify(primaryForm(entry));
 
-  // If wiki page already exists, go straight there
+  // If wiki page already exists, go straight there (context already appended on page load)
   const check = await fetch(`/api/wiki/word/${slug}`);
   if (check.ok) { location.href = `/wiki/word/${slug}`; return; }
 
@@ -527,6 +578,11 @@ async function addToWiki(entry) {
     .flatMap(s => s.glosses.filter(g => g.lang === 'eng').map(g => g.text));
   const notes = glosses.map((g, i) => `${i + 1}. ${g}`).join('\n');
   const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString() };
+  if (podcastName) {
+    ctx.podcast          = podcastName;
+    ctx.episode          = podcastEp;
+    ctx.podcastTimestamp = podcastTs;
+  }
 
   try {
     await fetch(`/api/wiki/word/${slug}`, {
@@ -589,45 +645,68 @@ async function renderWikiWordPage(slug) {
           const srcHtml = src.match(/^https?:\/\/|^\w+:\/\//)
             ? `<a href="${src}" target="_blank">${src}</a>`
             : src;
-          return `<li>${new Date(c.timestamp).toLocaleDateString()} — ${srcHtml}</li>`;
+          let podcastSuffix = '';
+          if (c.podcast) {
+            const epLabel = `${c.podcast} / ${c.episode}${c.podcastTimestamp ? ` @ ${c.podcastTimestamp}s` : ''}`;
+            const podcastPort = (window._jdictConfig || {}).podcastPort;
+            if (podcastPort) {
+              // Encode episode as a path segment: encode ASCII specials but leave Unicode readable
+              const epSeg = c.episode.replace(/\.mp3$/i, '').split('').map(ch => ch === '/' || ch.charCodeAt(0) > 127 ? ch : encodeURIComponent(ch)).join('');
+              const playUrl = `http://${window.location.hostname}:${podcastPort}/play${epSeg}?t=${c.podcastTimestamp}&from=wiki`;
+              podcastSuffix = ` — <a href="${playUrl}" target="_blank">${epLabel}</a>`;
+            } else {
+              podcastSuffix = ` — ${epLabel}`;
+            }
+          }
+          return `<li>${new Date(c.timestamp).toLocaleDateString()} — ${srcHtml}${podcastSuffix}</li>`;
         }).join('')}
       </ul>
     ` : ''}
 
-    <div class="section-label">Notes &amp; Tags</div>
-    <form class="wiki-form" id="wiki-form">
+    <div class="section-label section-label-row">Notes &amp; Tags <button type="button" class="quill-btn" id="edit-toggle" title="Edit">🖊️</button></div>
+    <form class="wiki-form view-mode" id="wiki-form">
       <label>Tags</label>
       <div class="tag-box" id="tag-box">
         <input class="tag-text-input" type="text" list="tags-list" placeholder="Add tag…">
       </div>
 
       <label for="wiki-notes">Notes</label>
-      <textarea id="wiki-notes">${escHtml(wiki.notes || '')}</textarea>
+      <textarea id="wiki-notes" readonly>${escHtml(wiki.notes || '')}</textarea>
 
-      <label>Image</label>
-      <div class="drop-zone" id="drop-zone"></div>
+      <div class="image-section">
+        <label>Image</label>
+        <div class="drop-zone" id="drop-zone"></div>
+      </div>
 
       <div class="form-row">
-        <button type="submit" class="primary" id="save-btn">Save</button>
+        <button type="submit" class="primary" id="save-btn" hidden>Save</button>
         <span class="save-status" id="save-status"></span>
       </div>
     </form>
   `;
 
-  const statusEl = document.getElementById('save-status');
-  const saveBtn  = document.getElementById('save-btn');
+  const statusEl  = document.getElementById('save-status');
+  const saveBtn   = document.getElementById('save-btn');
+  const wikiForm  = document.getElementById('wiki-form');
+  const editToggle = document.getElementById('edit-toggle');
   let isDirty = false;
+
+  function setEditMode(on) {
+    wikiForm.classList.toggle('view-mode', !on);
+    editToggle.classList.toggle('active', on);
+    document.getElementById('wiki-notes').readOnly = !on;
+  }
+  editToggle.addEventListener('click', () => setEditMode(wikiForm.classList.contains('view-mode')));
 
   function markDirty() {
     isDirty = true;
-    statusEl.textContent = '● unsaved';
-    statusEl.classList.add('dirty');
+    saveBtn.hidden = false;
+    saveBtn.classList.add('save-dirty');
   }
 
   async function save() {
     saveBtn.disabled = true;
     statusEl.textContent = 'Saving…';
-    statusEl.classList.remove('dirty');
     try {
       await fetch(`/api/wiki/word/${slug}`, {
         method: 'POST',
@@ -642,18 +721,19 @@ async function renderWikiWordPage(slug) {
         }),
       });
       isDirty = false;
+      saveBtn.hidden = true;
+      saveBtn.classList.remove('save-dirty');
       statusEl.textContent = 'Saved';
       populateTagsDatalist();
     } catch {
       statusEl.textContent = 'Save failed';
-      statusEl.classList.add('dirty');
     } finally {
       saveBtn.disabled = false;
       setTimeout(() => { if (!isDirty) statusEl.textContent = ''; }, 2500);
     }
   }
 
-  const tagWidget = makeTagWidget(document.getElementById('tag-box'), wiki.tags || [], markDirty);
+  const tagWidget = makeTagWidget(document.getElementById('tag-box'), wiki.tags || [], () => save());
   const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '', markDirty);
 
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
@@ -836,6 +916,7 @@ async function router() {
 }
 
 populateTagsDatalist();
+fetch('/api/config').then(r => r.json()).then(cfg => { window._jdictConfig = cfg; });
 router();
 </script>
 </body>

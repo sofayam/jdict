@@ -10,8 +10,10 @@ const wiki = require('./wiki');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
+const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || config.port || 8000;
 
 // Multer configuration for image uploads
 const storage = multer.diskStorage({
@@ -67,6 +69,10 @@ app.get('/', (req, res) => {
 // ─────────────────────────────────────────────
 // Health / status
 // ─────────────────────────────────────────────
+
+app.get('/api/config', (req, res) => {
+  res.json({ podcastPort: config.podcastPort });
+});
 
 app.get('/api/status', (req, res) => {
   /** Returns service health and database stats. */
