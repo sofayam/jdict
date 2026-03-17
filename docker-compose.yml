@@ -4,6 +4,6 @@ services:
     ports:
       - "${PORT}:${PORT}"
     volumes:
-      - ./mnt/appdata/jdict/data:/app/data
-      - ./mnt/appdata/jdict/wiki:/app/wiki
+      - /mnt/appdata/jdict/data:/app/data
+      - /mnt/appdata/jdict/wiki:/app/wiki
     restart: unless-stopped
