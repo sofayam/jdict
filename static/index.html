@@ -633,14 +633,11 @@ async function addToWiki(entry) {
   if (check.ok) { location.href = `/wiki/word/${slug}`; return; }
 
   // Create a new page, pre-filled with the top glosses
-  const glosses = entry.senses.slice(0, 3)
-    .flatMap(s => s.glosses.filter(g => g.lang === 'eng').map(g => g.text));
-  const notes = glosses.map((g, i) => `${i + 1}. ${g}`).join('\n');
-  const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString() };
+  const notes = '';
+  const contexts = [];
   if (podcastName) {
-    ctx.podcast          = podcastName;
-    ctx.episode          = podcastEp;
-    ctx.podcastTimestamp = podcastTs;
+    contexts.push({ source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString(),
+                    podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs });
   }
 
   try {
@@ -652,7 +649,7 @@ async function addToWiki(entry) {
         word: primaryForm(entry),
         notes,
         tags: [],
-        contexts: [ctx],
+        contexts,
         image: '',
       }),
     });
