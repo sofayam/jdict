@@ -1,4 +1,4 @@
-PORT := $(shell node -e "console.log(require('./config.json').port)")
+PORT := $(shell jq .port config.json)
 export PORT
 
 up:
