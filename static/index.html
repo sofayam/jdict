@@ -160,6 +160,21 @@
   .wiki-form.view-mode .image-section:has(.drop-zone.dz-empty) { display: none; }
   .wiki-form.view-mode .dz-hint { display: none; }
 
+  /* Notes: rendered div in view mode, textarea in edit mode */
+  .wiki-form.view-mode #wiki-notes { display: none; }
+  .wiki-form.view-mode #wiki-notes-rendered { display: block; }
+  #wiki-notes-rendered { display: none; }
+  .wiki-form.view-mode #wiki-notes-rendered:empty { display: none; }
+  .wiki-notes-rendered { line-height: 1.6; }
+  .wiki-notes-rendered h1 { margin: 0.5em 0 0.25em; font-size: 1.4em; font-weight: bold; }
+  .wiki-notes-rendered h2 { margin: 0.5em 0 0.25em; font-size: 1.2em; font-weight: bold; }
+  .wiki-notes-rendered h3 { margin: 0.5em 0 0.25em; font-size: 1em; font-weight: bold; }
+  .wiki-notes-rendered p { margin: 0 0 0.5em; }
+  .wiki-notes-rendered ul, .wiki-notes-rendered ol { margin: 0 0 0.5em; padding-left: 1.5em; }
+  .wiki-notes-rendered code { font-family: monospace; background: var(--bg2, #f4f4f4); padding: 0 2px; border-radius: 2px; }
+  .wiki-notes-rendered pre { background: var(--bg2, #f4f4f4); padding: 0.5em; border-radius: 4px; overflow-x: auto; }
+  .wiki-notes-rendered blockquote { border-left: 3px solid var(--border); margin: 0; padding-left: 0.75em; color: #666; }
+
   /* Save button: only shown when dirty, always red */
   button.save-dirty { background: #c00; color: #fff; border-color: #c00; }
 
@@ -229,7 +244,7 @@
   .context-list { list-style: none; padding: 0; margin-bottom: 4px; }
   .context-list li { font-size: 12px; color: var(--muted); padding: 2px 0; }
 
-  /* Wiki index */
+  /* Wiki index (legacy lists, still used by getWikiIndexData callers) */
   .wiki-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
   @media (max-width: 480px) { .wiki-cols { grid-template-columns: 1fr; } }
   .wiki-list { list-style: none; padding: 0; }
@@ -237,6 +252,50 @@
   .wiki-list a { text-decoration: none; color: var(--text); }
   .wiki-list a:hover { color: var(--accent); }
   .wiki-none { font-size: 12px; color: var(--muted); padding: 4px 0; }
+
+  /* Wiki browse */
+  #wiki-filter {
+    width: 100%;
+    padding: 8px;
+    font-size: 15px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    outline: none;
+    font-family: inherit;
+    margin-bottom: 2px;
+  }
+  #wiki-filter:focus { border-color: var(--text); }
+
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 4px 0 8px; }
+  .tag-cloud-item { text-decoration: none; color: var(--text); line-height: 1.4; }
+  .tag-cloud-item:hover { color: var(--accent); }
+  .tag-cloud-item sup { font-size: 9px; color: var(--muted); margin-left: 1px; }
+
+  .wiki-stats { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+
+  .podcast-group { border-bottom: 1px solid var(--border); }
+  .podcast-group-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 11px 0;
+    cursor: pointer;
+    user-select: none;
+  }
+  .podcast-group-header:hover .podcast-group-name { color: var(--accent); }
+  .podcast-group-name { font-size: 15px; font-weight: bold; }
+  .podcast-group-stats { font-size: 12px; color: var(--muted); flex: 1; }
+  .podcast-group-chevron { font-size: 11px; color: var(--muted); transition: transform 0.15s; display: inline-block; }
+  .podcast-group.expanded .podcast-group-chevron { transform: rotate(90deg); }
+  .podcast-group-episodes { display: none; padding-bottom: 4px; }
+  .podcast-group.expanded .podcast-group-episodes { display: block; }
+
+  .episode-card { padding: 10px 0 10px 12px; border-bottom: 1px solid var(--border); }
+  .episode-card:last-child { border-bottom: none; }
+  .episode-meta { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; }
+  .episode-date { font-size: 11px; color: var(--muted); }
+  .episode-title { font-size: 13px; color: var(--text); margin-bottom: 7px; }
+  .episode-card .word-chips a { font-size: 15px; padding: 3px 10px; }
 
   /* Tag word grid */
   .word-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
@@ -671,7 +730,8 @@ async function renderWikiWordPage(slug) {
       </div>
 
       <label for="wiki-notes">Notes</label>
-      <textarea id="wiki-notes" readonly>${escHtml(wiki.notes || '')}</textarea>
+      <div id="wiki-notes-rendered" class="wiki-notes-rendered"></div>
+      <textarea id="wiki-notes" readonly></textarea>
 
       <div class="image-section">
         <label>Image</label>
@@ -684,6 +744,9 @@ async function renderWikiWordPage(slug) {
       </div>
     </form>
   `;
+
+  document.getElementById('wiki-notes-rendered').innerHTML = wiki.notesHtml || '';
+  document.getElementById('wiki-notes').value = wiki.notes || '';
 
   const statusEl  = document.getElementById('save-status');
   const saveBtn   = document.getElementById('save-btn');
@@ -819,34 +882,88 @@ async function renderWikiIndexPage() {
   paginationDiv.innerHTML = '';
   resultsDiv.innerHTML = '<div class="loading">Loading…</div>';
 
-  const data = await fetch('/api/wiki/index').then(r => r.json());
+  const data = await fetch('/api/wiki/browse').then(r => r.json());
 
-  function wikiList(items, base) {
-    if (!items?.length) return '<p class="wiki-none">None yet</p>';
-    return `<ul class="wiki-list">${items.map(i => `<li><a href="${base}${i.name}">${i.name}</a></li>`).join('')}</ul>`;
+  function epLabel(episode, podcast) {
+    let s = (episode || '').replace(/\.mp3$/i, '');
+    const prefix = '/' + podcast + '/';
+    if (s.startsWith(prefix)) s = s.slice(prefix.length);
+    return s || episode;
   }
 
+  function fmtMonth(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  }
+
+  function renderPodcasts(filter) {
+    const q = filter.trim().toLowerCase();
+    const filtering = q.length > 0;
+    let html = '';
+    let anyMatch = false;
+
+    for (const podcast of data.podcasts) {
+      let epHtml = '';
+      let epMatches = 0;
+      const matchedWords = new Set();
+
+      for (const ep of podcast.episodes) {
+        const words = filtering ? ep.words.filter(w => w.toLowerCase().includes(q)) : ep.words;
+        if (filtering && !words.length) continue;
+        epMatches++;
+        words.forEach(w => matchedWords.add(w));
+        const date = ep.latestTimestamp ? new Date(ep.latestTimestamp).toLocaleDateString() : '';
+        const label = epLabel(ep.episode, podcast.name);
+        epHtml += `<div class="episode-card">
+          <div class="episode-meta"><span class="episode-date">${date}</span></div>
+          <div class="episode-title">${escHtml(label)}</div>
+          <div class="word-chips">${words.map(w =>
+            `<a href="/wiki/word/${encodeURIComponent(w)}">${escHtml(w)}</a>`
+          ).join('')}</div>
+        </div>`;
+      }
+
+      if (filtering && !epMatches) continue;
+      anyMatch = true;
+
+      const wordCount = filtering ? matchedWords.size : podcast.wordCount;
+      const epCount   = filtering ? epMatches : podcast.episodeCount;
+
+      html += `<div class="podcast-group${filtering ? ' expanded' : ''}">
+        <div class="podcast-group-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <span class="podcast-group-name">${escHtml(podcast.name)}</span>
+          <span class="podcast-group-stats">${wordCount} words · ${epCount} episodes</span>
+          <span class="podcast-group-chevron">▸</span>
+        </div>
+        <div class="podcast-group-episodes">${epHtml}</div>
+      </div>`;
+    }
+
+    return anyMatch ? html : '<p class="wiki-none">No matches</p>';
+  }
+
+  const tagCloud = data.tags.length
+    ? data.tags.map(t => {
+        const size = Math.round(Math.max(11, Math.min(22, 11 + Math.sqrt(t.count) * 3)));
+        return `<a href="/wiki/tag/${encodeURIComponent(t.name)}" class="tag-cloud-item" style="font-size:${size}px">${escHtml(t.name)}<sup>${t.count}</sup></a>`;
+      }).join('')
+    : '';
+
+  const { wordCount, podcastCount, earliest, latest } = data.stats;
+  const dateRange = earliest ? `${fmtMonth(earliest)} – ${fmtMonth(latest)}` : '';
+
   resultsDiv.innerHTML = `
-    <div style="font-size:22px;font-weight:bold;margin:12px 0 16px">Wiki</div>
-    <div class="wiki-cols">
-      <div>
-        <div class="section-label">Recently added words</div>
-        ${wikiList(data.wordsByCreated, '/wiki/word/')}
-      </div>
-      <div>
-        <div class="section-label">Recently edited words</div>
-        ${wikiList(data.wordsByModified, '/wiki/word/')}
-      </div>
-      <div>
-        <div class="section-label">Recently added tags</div>
-        ${wikiList(data.tagsByCreated, '/wiki/tag/')}
-      </div>
-      <div>
-        <div class="section-label">Recently edited tags</div>
-        ${wikiList(data.tagsByModified, '/wiki/tag/')}
-      </div>
-    </div>
+    <div style="font-size:22px;font-weight:bold;margin:12px 0 4px">Wiki</div>
+    <div class="wiki-stats">${wordCount} words · ${podcastCount} podcasts${dateRange ? ` · ${dateRange}` : ''}</div>
+    <input type="search" id="wiki-filter" placeholder="Filter words…" autocomplete="off">
+    ${tagCloud ? `<div class="section-label">Tags</div><div class="tag-cloud">${tagCloud}</div>` : ''}
+    <div class="section-label">Podcasts</div>
+    <div id="podcast-list">${renderPodcasts('')}</div>
   `;
+
+  document.getElementById('wiki-filter').addEventListener('input', e => {
+    document.getElementById('podcast-list').innerHTML = renderPodcasts(e.target.value);
+  });
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────

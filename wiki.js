@@ -185,6 +185,80 @@ async function getWordsForTag(tagName) {
   return words;
 }
 
+async function getWikiBrowseData() {
+  const files = await fs.readdir(WORDS_PATH);
+  const mdFiles = files.filter(f => path.extname(f) === '.md');
+
+  const allWords = [];
+  const tagCounts = {};
+  const episodeMap = {};
+  let earliest = '';
+  let latest = '';
+
+  for (const file of mdFiles) {
+    const word = path.basename(file, '.md');
+    allWords.push(word);
+
+    const fileContent = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
+    const { data } = matter(fileContent);
+
+    if (Array.isArray(data.tags)) {
+      for (const tag of data.tags) {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+      }
+    }
+
+    if (Array.isArray(data.contexts)) {
+      const seenInThisWord = new Set();
+      for (const ctx of data.contexts) {
+        if (!ctx.podcast || !ctx.episode) continue;
+        const key = `${ctx.podcast}\x00${ctx.episode}`;
+        if (seenInThisWord.has(key)) continue;
+        seenInThisWord.add(key);
+
+        if (!episodeMap[key]) {
+          episodeMap[key] = { podcast: ctx.podcast, episode: ctx.episode, latestTimestamp: '', words: [] };
+        }
+        episodeMap[key].words.push(word);
+        if ((ctx.timestamp || '') > episodeMap[key].latestTimestamp) {
+          episodeMap[key].latestTimestamp = ctx.timestamp || '';
+        }
+        if (ctx.timestamp) {
+          if (!earliest || ctx.timestamp < earliest) earliest = ctx.timestamp;
+          if (!latest   || ctx.timestamp > latest)   latest   = ctx.timestamp;
+        }
+      }
+    }
+  }
+
+  allWords.sort((a, b) => a.localeCompare(b, 'ja'));
+
+  const tags = Object.entries(tagCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Group episodes by podcast
+  const podcastMap = {};
+  for (const ep of Object.values(episodeMap)) {
+    if (!podcastMap[ep.podcast]) {
+      podcastMap[ep.podcast] = { name: ep.podcast, episodes: [], wordSet: new Set() };
+    }
+    podcastMap[ep.podcast].episodes.push(ep);
+    for (const w of ep.words) podcastMap[ep.podcast].wordSet.add(w);
+  }
+
+  const podcasts = Object.values(podcastMap).map(p => ({
+    name: p.name,
+    wordCount: p.wordSet.size,
+    episodeCount: p.episodes.length,
+    episodes: p.episodes.sort((a, b) => b.latestTimestamp.localeCompare(a.latestTimestamp)),
+  })).sort((a, b) => b.wordCount - a.wordCount);
+
+  const stats = { wordCount: allWords.length, podcastCount: podcasts.length, earliest, latest };
+
+  return { words: allWords, tags, podcasts, stats };
+}
+
 async function saveTagPage(tagName, pageData) {
   const { notes, ...frontMatter } = pageData;
   const fileContent = matter.stringify(notes || '', frontMatter);
@@ -198,6 +272,7 @@ module.exports = {
   saveWordPage,
   getAllTags,
   getWikiIndexData,
+  getWikiBrowseData,
   getTagPage,
   getWordsForTag,
   saveTagPage,

@@ -1,0 +1,11 @@
+services:
+  jdict:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mnt/appdata/jdict/data:/app/data
+      - ./mnt/appdata/jdict/wiki:/app/wiki
+    restart: unless-stopped
+    environment:
+      - PORT=8000

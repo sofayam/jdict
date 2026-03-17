@@ -5,6 +5,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { marked } = require('marked');
 const database = require('./db');
 const wiki = require('./wiki');
 const multer = require('multer');
@@ -184,6 +185,16 @@ app.get('/api/random', (req, res) => {
 // Wiki
 // ─────────────────────────────────────────────
 
+app.get('/api/wiki/browse', async (req, res) => {
+  try {
+    const data = await wiki.getWikiBrowseData();
+    res.json(data);
+  } catch (error) {
+    console.error('Failed to get wiki browse data:', error);
+    res.status(500).json({ error: 'Failed to get wiki browse data' });
+  }
+});
+
 app.get('/api/wiki/index', async (req, res) => {
   try {
     const indexData = await wiki.getWikiIndexData();
@@ -208,6 +219,7 @@ app.get('/api/wiki/word/:word', async (req, res) => {
   try {
     const page = await wiki.getWordPage(req.params.word);
     if (page) {
+      if (page.notes) page.notesHtml = marked.parse(page.notes);
       res.json(page);
     } else {
       // This is not an error, it just means no page has been created yet.

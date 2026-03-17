@@ -1,0 +1,10 @@
+node_modules
+data/
+wiki/
+.git
+.DS_Store
+.claude/
+attic/
+__pycache__/
+*.pyc
+*.tar
