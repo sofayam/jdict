@@ -8,3 +8,5 @@ attic/
 __pycache__/
 *.pyc
 *.tar
+WORDS.db
+*.md

@@ -160,6 +160,43 @@ sequence numbers by kanji/kana.
 
 ---
 
+## Docker
+
+The port is read from `config.json` — no need to change anything in the Docker files when you change the port.
+
+### First-time setup
+
+```bash
+make build
+make up
+```
+
+If you don't yet have a database, import it (with `data/JMdict` already in the data mount path on the host):
+
+```bash
+docker compose run --rm jdict node importer.js --xml data/JMdict --db data/jdict.db
+```
+
+### Subsequent deploys
+
+```bash
+make build
+make up
+```
+
+### Other commands
+
+```bash
+make logs    # tail the logs
+make down    # stop the container
+```
+
+### Data persistence
+
+`data/` (SQLite database) and `wiki/` (user content) are mounted from the host at the paths defined in `docker-compose.yml`. They are never baked into the image, so rebuilds are safe.
+
+---
+
 ## Running as a System Service (Linux)
 
 Create `/etc/systemd/system/jdict.service`:
