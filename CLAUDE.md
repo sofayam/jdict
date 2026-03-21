@@ -22,6 +22,19 @@ There are no automated tests (`npm test` exits with an error).
 
 The server port defaults to 8000 but can be overridden with `PORT` env var. Ports are also stored in `config.json`.
 
+## Docker
+
+```bash
+make build   # build the image
+make up      # start the container
+make down    # stop the container
+make logs    # tail logs
+```
+
+The port is read from `config.json` via `jq` in the `Makefile` — it is the single source of truth. Do not hardcode ports in `Dockerfile` or `docker-compose.yml`.
+
+`data/` and `wiki/` are mounted from the host (paths defined in `docker-compose.yml`) and never baked into the image.
+
 ## Architecture
 
 This is a Node.js/Express app (migrated from a Python/FastAPI origin — the `attic/` folder contains the old Python code). The stack is:
@@ -49,6 +62,12 @@ Each entry in `contexts` has:
 - `timestamp` — ISO date of the lookup
 - `podcast`, `episode`, `podcastTimestamp` — optional; present when the lookup came from a podcast player
 
+Context records are only added when a lookup originates from the podcast player (`podcastName` is set). Direct dictionary lookups never write context records. New wiki pages are created with empty notes and an empty contexts array.
+
+### Search results — wiki badge
+
+After rendering search results, the frontend fires a single `POST /api/wiki/exists` request with all result slugs. Entries that already have a wiki page get a small `wiki` badge next to the kanji. The badge insertion is guarded by a `searchEpoch` counter so stale responses from superseded searches are ignored.
+
 ### Podcast player integration
 
 A podcast app calls `/search/{word}?podcast={name}&episode={path}&timestamp={seconds}` to look up a word while listening. The frontend:
@@ -69,5 +88,21 @@ A **🖊️ quill icon** in the "Notes & Tags" section header toggles edit mode.
 - **Tag lozenges** are links to `/wiki/tag/{name}` in view mode; in edit mode clicking a tag suppresses navigation and focuses the tag input instead.
 
 ### Client-side routing
+
+## Conventions and decisions
+
+### Wiki notes
+- Never pre-fill the notes field with English glosses when creating a new wiki page. The glosses already appear at the top of the entry — putting them in notes too is redundant.
+- Notes are for the user's own observations, not auto-generated content.
+
+### Wiki contexts
+- Context records are only written when a lookup comes from the podcast player (`podcastName` is set in the query string).
+- Direct dictionary lookups never write context records — not on new page creation, not on existing page load.
+
+### Ports / config
+- `config.json` is the single source of truth for port numbers. Do not hardcode ports anywhere else (Dockerfile, docker-compose.yml, env vars). The Makefile reads the port from `config.json` via `jq`.
+
+### Pending work
+- Wiki image uploads currently preserve the original format (JPEG, PNG, GIF mixed). There is an open intention to standardise on a single format (JPEG or WebP) using `sharp` for server-side conversion, and potentially backfill existing images. Target format not yet decided.
 
 The server sends `static/index.html` for all frontend routes (`/`, `/entry/:seq`, `/wiki`, `/wiki/word/:word`, `/wiki/tag/:name`, `/search/:word`). The frontend JS reads `window.location.pathname` to determine which view to render, using `history.pushState` for navigation.

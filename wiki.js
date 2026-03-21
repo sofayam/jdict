@@ -259,6 +259,15 @@ async function getWikiBrowseData() {
   return { words: allWords, tags, podcasts, stats };
 }
 
+async function wordExists(word) {
+  try {
+    await fs.access(path.join(WORDS_PATH, `${word}.md`));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function saveTagPage(tagName, pageData) {
   const { notes, ...frontMatter } = pageData;
   const fileContent = matter.stringify(notes || '', frontMatter);
@@ -269,6 +278,7 @@ async function saveTagPage(tagName, pageData) {
 module.exports = {
   slugify,
   getWordPage,
+  wordExists,
   saveWordPage,
   getAllTags,
   getWikiIndexData,

@@ -78,6 +78,7 @@
     margin-right: 4px;
   }
   .gloss:not(:last-child)::after { content: "; "; }
+  .wiki-badge { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 1px 4px; border-radius: 2px; }
   .s-inf { font-size: 12px; color: var(--muted); font-style: italic; }
 
   #pagination { display: flex; gap: 16px; padding: 20px 0; justify-content: center; }
@@ -369,6 +370,7 @@ const tagsDatalist = document.getElementById('tags-list');
 let currentQuery  = '';
 let currentOffset = 0;
 let debounceTimer = null;
+let searchEpoch   = 0;
 const LIMIT = 20;
 
 // Capture source context from the calling app (e.g. podcast player URL)
@@ -545,7 +547,7 @@ function renderSearchResults(data, q, offset) {
     : '';
 
   resultsDiv.innerHTML = data.results.map(e => `
-    <div class="entry">
+    <div class="entry" data-slug="${slugify(primaryForm(e))}">
       <div class="entry-main-link">
         <a class="entry-link" href="/entry/${e.seq}${podParams}">
           <div class="entry-head">
@@ -557,6 +559,20 @@ function renderSearchResults(data, q, offset) {
       </div>
     </div>
   `).join('');
+
+  const epoch = ++searchEpoch;
+  fetch('/api/wiki/exists', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slugs: data.results.map(e => slugify(primaryForm(e))) }),
+  }).then(r => r.json()).then(exists => {
+    if (searchEpoch !== epoch) return;
+    for (const [slug, has] of Object.entries(exists)) {
+      if (!has) continue;
+      const head = resultsDiv.querySelector(`[data-slug="${slug}"] .entry-head`);
+      if (head) head.insertAdjacentHTML('beforeend', '<span class="wiki-badge">wiki</span>');
+    }
+  });
 
   paginationDiv.innerHTML = '';
   if (offset > 0) {

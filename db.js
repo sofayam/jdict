@@ -70,16 +70,10 @@ function search(q, lang = 'eng', limit = 20, offset = 0) {
     // Unified query for exact and prefix matches.
     // Exact matches are prioritized.
     rows = db.prepare(`
-      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt, 1 as priority
-      FROM entries e JOIN entries_text t ON t.seq = e.seq
-      WHERE (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?)
-      
-      UNION
-      
-      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt, 2 as priority
+      SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt,
+        CASE WHEN (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?) THEN 1 ELSE 2 END as priority
       FROM entries e JOIN entries_text t ON t.seq = e.seq
       WHERE (t.kanji LIKE ?) OR (t.kana LIKE ?)
-      
       ORDER BY priority, e.seq
       LIMIT ? OFFSET ?
     `).all(exactPattern, exactPattern, prefixPattern, prefixPattern, limit, offset);

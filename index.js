@@ -215,6 +215,13 @@ app.get('/api/wiki/tags', async (req, res) => {
   }
 });
 
+app.post('/api/wiki/exists', async (req, res) => {
+  const { slugs } = req.body;
+  if (!Array.isArray(slugs)) return res.status(400).json({ error: 'slugs must be an array' });
+  const pairs = await Promise.all(slugs.map(async s => [s, await wiki.wordExists(s)]));
+  res.json(Object.fromEntries(pairs));
+});
+
 app.get('/api/wiki/word/:word', async (req, res) => {
   try {
     const page = await wiki.getWordPage(req.params.word);
