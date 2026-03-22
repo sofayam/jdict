@@ -9,7 +9,8 @@ const matter = require('gray-matter');
 const WIKI_PATH = path.join(__dirname, 'wiki');
 const WORDS_PATH = path.join(WIKI_PATH, 'words');
 const TAGS_PATH = path.join(WIKI_PATH, 'tags');
-const IMAGES_PATH = path.join(WIKI_PATH, 'images'); // Added IMAGES_PATH
+const IMAGES_PATH = path.join(WIKI_PATH, 'images');
+const CARDS_PATH = path.join(WIKI_PATH, 'cards');
 
 /**
  * Ensures that the necessary wiki directories exist.
@@ -275,6 +276,97 @@ async function saveTagPage(tagName, pageData) {
   await fs.writeFile(filePath, fileContent, 'utf8');
 }
 
+async function getCardPage(slug) {
+  const filePath = path.join(CARDS_PATH, `${slug}.md`);
+  try {
+    const fileContent = await fs.readFile(filePath, 'utf8');
+    const { data, content } = matter(fileContent);
+    return { ...data, slug, notes: content };
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// Convert a single katakana char to hiragana; leave hiragana unchanged.
+function toHira(ch) {
+  const code = ch.charCodeAt(0);
+  return (code >= 0x30A1 && code <= 0x30F6) ? String.fromCharCode(code - 0x60) : ch;
+}
+
+function firstKanaChar(reading) {
+  return reading ? toHira(reading[0]) : '';
+}
+
+// Returns { words: { "あ": N, ... }, cards: { "あ": N, ... } }
+async function getKanaIndex(db) {
+  const wordFiles = await fs.readdir(WORDS_PATH).catch(() => []);
+  const wordCounts = {};
+  const stmt = db.prepare('SELECT kana_json FROM entries WHERE seq = ?');
+
+  for (const file of wordFiles) {
+    if (path.extname(file) !== '.md') continue;
+    const content = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
+    const { data } = matter(content);
+    if (!data.seq) continue;
+    const row = stmt.get(data.seq);
+    if (!row) continue;
+    const kana = JSON.parse(row.kana_json);
+    const ch = firstKanaChar(kana[0]?.reb || '');
+    if (ch) wordCounts[ch] = (wordCounts[ch] || 0) + 1;
+  }
+
+  const cardFiles = await fs.readdir(CARDS_PATH).catch(() => []);
+  const cardCounts = {};
+  for (const file of cardFiles) {
+    if (path.extname(file) !== '.md') continue;
+    const content = await fs.readFile(path.join(CARDS_PATH, file), 'utf8');
+    const { data } = matter(content);
+    const ch = firstKanaChar(data.reading || '');
+    if (ch) cardCounts[ch] = (cardCounts[ch] || 0) + 1;
+  }
+
+  return { words: wordCounts, cards: cardCounts };
+}
+
+// Returns { char, words: [{slug, reading}], cards: [{slug, reading, english, japanese}] }
+async function getKanaWords(db, char) {
+  const hira = toHira(char);
+  const stmt = db.prepare('SELECT kana_json FROM entries WHERE seq = ?');
+
+  const wordFiles = await fs.readdir(WORDS_PATH).catch(() => []);
+  const words = [];
+  for (const file of wordFiles) {
+    if (path.extname(file) !== '.md') continue;
+    const slug = path.basename(file, '.md');
+    const content = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
+    const { data } = matter(content);
+    if (!data.seq) continue;
+    const row = stmt.get(data.seq);
+    if (!row) continue;
+    const kana = JSON.parse(row.kana_json);
+    const reading = kana[0]?.reb || '';
+    if (firstKanaChar(reading) === hira) words.push({ slug, reading });
+  }
+  words.sort((a, b) => a.reading.localeCompare(b.reading, 'ja'));
+
+  const cardFiles = await fs.readdir(CARDS_PATH).catch(() => []);
+  const cards = [];
+  for (const file of cardFiles) {
+    if (path.extname(file) !== '.md') continue;
+    const slug = path.basename(file, '.md');
+    const content = await fs.readFile(path.join(CARDS_PATH, file), 'utf8');
+    const { data } = matter(content);
+    const reading = data.reading || '';
+    if (firstKanaChar(reading) === hira) {
+      cards.push({ slug, reading, english: data.english || '', japanese: data.japanese || '' });
+    }
+  }
+  cards.sort((a, b) => a.reading.localeCompare(b.reading, 'ja'));
+
+  return { char: hira, words, cards };
+}
+
 module.exports = {
   slugify,
   getWordPage,
@@ -286,4 +378,7 @@ module.exports = {
   getTagPage,
   getWordsForTag,
   saveTagPage,
+  getCardPage,
+  getKanaIndex,
+  getKanaWords,
 };

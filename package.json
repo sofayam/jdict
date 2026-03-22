@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "import": "node importer.js",
+    "ankiimport": "node ankiimport.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,6 +15,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "better-sqlite3": "^12.6.2",
     "express": "^5.2.1",
     "fast-xml-parser": "^5.4.2",
@@ -21,6 +23,7 @@
     "marked": "^17.0.4",
     "minimist": "^1.2.8",
     "multer": "^2.1.1",
+    "sharp": "^0.34.5",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

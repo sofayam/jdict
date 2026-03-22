@@ -164,6 +164,7 @@ function entryCount() {
 module.exports = {
   DB_PATH,
   dbExists,
+  getDb,
   search,
   getEntry,
   getByJlpt,

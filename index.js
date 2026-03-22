@@ -205,6 +205,37 @@ app.get('/api/wiki/index', async (req, res) => {
   }
 });
 
+app.get('/api/wiki/card/:slug', async (req, res) => {
+  try {
+    const page = await wiki.getCardPage(req.params.slug);
+    if (page) {
+      if (page.notes) page.notesHtml = marked.parse(page.notes);
+      res.json(page);
+    }
+    else res.status(404).json({ error: 'Card not found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/wiki/kana-index', async (req, res) => {
+  try {
+    const data = await wiki.getKanaIndex(database.getDb());
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/wiki/kana/:char', async (req, res) => {
+  try {
+    const data = await wiki.getKanaWords(database.getDb(), req.params.char);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/wiki/tags', async (req, res) => {
   try {
     const tags = await wiki.getAllTags();
@@ -297,6 +328,18 @@ app.get('/wiki/word/:word', (req, res) => {
 
 app.get('/wiki', (req, res) => {
   // Client-side router will handle rendering the wiki index.
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/card/:slug', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/kana', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/kana/:char', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 

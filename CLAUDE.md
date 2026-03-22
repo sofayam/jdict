@@ -16,6 +16,10 @@ npm run dev        # nodemon index.js
 
 # Import JMdict XML into the SQLite database (one-time setup)
 node importer.js --xml data/JMdict --db data/jdict.db
+
+# Import an Anki .apkg deck into the wiki (one-time or repeated)
+node ankiimport.js file.apkg
+node ankiimport.js file.apkg --limit 50   # test with a small batch first
 ```
 
 There are no automated tests (`npm test` exits with an error).
@@ -41,9 +45,10 @@ This is a Node.js/Express app (migrated from a Python/FastAPI origin — the `at
 
 - **`index.js`** — Express server, all route definitions. Serves the frontend SPA and the REST API under `/api/`.
 - **`db.js`** — SQLite access layer using `better-sqlite3`. Synchronous reads; the DB is opened lazily on first access. Contains search logic (Japanese kana/kanji LIKE queries, FTS5 for English glosses).
-- **`wiki.js`** — File-based wiki system using `gray-matter` for markdown+frontmatter. Word and tag pages are stored as `.md` files under `wiki/words/` and `wiki/tags/`. Images are stored in `wiki/images/` and served statically.
+- **`wiki.js`** — File-based wiki system using `gray-matter` for markdown+frontmatter. Word and tag pages are stored as `.md` files under `wiki/words/` and `wiki/tags/`. Card pages are stored under `wiki/cards/`. Images are stored in `wiki/images/` and served statically.
 - **`importer.js`** — One-time JMdict XML → SQLite converter using `fast-xml-parser`. Creates the `entries`, `entries_text`, and `entries_fts` (FTS5) tables.
-- **`static/index.html`** — The entire frontend as a single self-contained HTML file (no build step). Implements client-side routing via `history.pushState`. Views: search, entry detail, wiki index, word page, tag page.
+- **`ankiimport.js`** — One-time Anki `.apkg` → wiki importer. Handles the modern Anki format (zstd-compressed `collection.anki21b` and `media` file with protobuf map). For each note: if the Japanese field matches a JMdict entry, creates/updates a wiki word page (adds `anki` tag, image, story under `# Example`); otherwise writes a card page to `wiki/cards/`. Run with `node ankiimport.js file.apkg [--limit N]`.
+- **`static/index.html`** — The entire frontend as a single self-contained HTML file (no build step). Implements client-side routing via `history.pushState`. Views: search, entry detail, wiki index, word page, tag page, card page, kana index.
 - **`config.json`** — Server constants: `port` (default 8000) and `podcastPort` (8014). Read by `index.js` at startup; exposed to the frontend via `GET /api/config`.
 
 ### Database schema
@@ -56,6 +61,8 @@ Three tables in `data/jdict.db`:
 ### Wiki format
 
 Word and tag pages are markdown files with YAML frontmatter (via `gray-matter`). Frontmatter fields on word pages include `tags` (array), `seq` (JMdict sequence number), `image` (filename), and `contexts` (array of lookup records). The `notes` field maps to the markdown body. Tag pages are auto-created when a word page references a new tag.
+
+Card pages (`wiki/cards/*.md`) are created by `ankiimport.js` for Anki notes whose Japanese field does not match any JMdict entry. Frontmatter fields: `type: card`, `slug`, `english`, `japanese`, `reading`, `image`. The markdown body holds the story text. Card pages are read-only (no edit UI); served at `/wiki/card/:slug` via `GET /api/wiki/card/:slug`.
 
 Each entry in `contexts` has:
 - `source` — a URL or `entry:{seq}` string
@@ -88,6 +95,27 @@ A **🖊️ quill icon** in the "Notes & Tags" section header toggles edit mode.
 - **Tag lozenges** are links to `/wiki/tag/{name}` in view mode; in edit mode clicking a tag suppresses navigation and focuses the tag input instead.
 
 ### Client-side routing
+
+The server sends `static/index.html` for all frontend routes. Current routes:
+
+| Path | View |
+|------|------|
+| `/` | Search |
+| `/search/:word` | Search results |
+| `/entry/:seq` | Dictionary entry detail |
+| `/wiki` | Wiki index (kana grid, tag cloud, podcast list) |
+| `/wiki/word/:slug` | Wiki word page (editable) |
+| `/wiki/tag/:name` | Tag page |
+| `/wiki/card/:slug` | Card page (read-only, from Anki import) |
+| `/wiki/kana/:char` | Kana index page — all words/cards starting with that character |
+
+### Kana index
+
+The wiki index page shows a gojuuon grid (あいうえお…わをん). Each active cell links to `/wiki/kana/:char`. The kana index page lists:
+- **Words** — wiki word pages, sorted by primary JMdict reading (`kana_json[0].reb`)
+- **Cards** — card pages, sorted by their `reading` frontmatter field
+
+API: `GET /api/wiki/kana-index` (counts per character), `GET /api/wiki/kana/:char` (full word/card lists). Katakana readings are normalised to hiragana for grouping. Implemented in `wiki.getKanaIndex(db)` and `wiki.getKanaWords(db, char)`.
 
 ## Conventions and decisions
 

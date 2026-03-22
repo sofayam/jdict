@@ -274,6 +274,22 @@
 
   .wiki-stats { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 
+  .kana-grid { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 12px; }
+  .kana-row { display: flex; gap: 2px; }
+  .kana-cell { display: inline-flex; align-items: baseline; justify-content: center; min-width: 36px; padding: 4px 2px; border-radius: 4px; font-size: 16px; text-align: center; }
+  .kana-cell sup { font-size: 9px; color: var(--muted); margin-left: 1px; }
+  .kana-cell-active { background: var(--bg2, #f0f0f0); text-decoration: none; color: var(--text); }
+  .kana-cell-active:hover { background: var(--accent); color: #fff; }
+  .kana-cell-active:hover sup { color: rgba(255,255,255,0.7); }
+  .kana-cell-empty { color: var(--muted); opacity: 0.35; }
+
+  .kana-word-list { display: flex; flex-direction: column; gap: 0; margin-bottom: 12px; }
+  .kana-word-entry { display: flex; align-items: baseline; gap: 10px; padding: 5px 2px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); }
+  .kana-word-entry:hover { background: var(--bg2, #f8f8f8); }
+  .kana-word-slug { font-size: 17px; min-width: 80px; }
+  .kana-word-reading { font-size: 13px; color: var(--muted); }
+  .kana-word-english { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
+
   .podcast-group { border-bottom: 1px solid var(--border); }
   .podcast-group-header {
     display: flex;
@@ -965,10 +981,27 @@ async function renderWikiIndexPage() {
   const { wordCount, podcastCount, earliest, latest } = data.stats;
   const dateRange = earliest ? `${fmtMonth(earliest)} – ${fmtMonth(latest)}` : '';
 
+  // Kana index grid
+  const kana = await fetch('/api/wiki/kana-index').then(r => r.json());
+  const GOJUUON = ['あいうえお','かきくけこ','さしすせそ','たちつてと','なにぬねの',
+                   'はひふへほ','まみむめも','やゆよ','らりるれろ','わをん'];
+  function kanaCell(ch, counts) {
+    const n = (counts.words[ch] || 0) + (counts.cards[ch] || 0);
+    const cls = n ? 'kana-cell kana-cell-active' : 'kana-cell kana-cell-empty';
+    return n
+      ? `<a href="/wiki/kana/${encodeURIComponent(ch)}" class="${cls}">${ch}<sup>${n}</sup></a>`
+      : `<span class="${cls}">${ch}</span>`;
+  }
+  const kanaGrid = `<div class="kana-grid">${
+    GOJUUON.map(row => `<div class="kana-row">${[...row].map(ch => kanaCell(ch, kana)).join('')}</div>`).join('')
+  }</div>`;
+
   resultsDiv.innerHTML = `
     <div style="font-size:22px;font-weight:bold;margin:12px 0 4px">Wiki</div>
     <div class="wiki-stats">${wordCount} words · ${podcastCount} podcasts${dateRange ? ` · ${dateRange}` : ''}</div>
     <input type="search" id="wiki-filter" placeholder="Filter words…" autocomplete="off">
+    <div class="section-label">Index</div>
+    ${kanaGrid}
     ${tagCloud ? `<div class="section-label">Tags</div><div class="tag-cloud">${tagCloud}</div>` : ''}
     <div class="section-label">Podcasts</div>
     <div id="podcast-list">${renderPodcasts('')}</div>
@@ -977,6 +1010,75 @@ async function renderWikiIndexPage() {
   document.getElementById('wiki-filter').addEventListener('input', e => {
     document.getElementById('podcast-list').innerHTML = renderPodcasts(e.target.value);
   });
+}
+
+async function renderWikiCardPage(slug) {
+  setMeta(`<a href="javascript:history.back()">← Back</a> &nbsp;·&nbsp; <a href="/wiki">Wiki</a>`);
+  paginationDiv.innerHTML = '';
+  resultsDiv.innerHTML = '<div class="loading">Loading…</div>';
+
+  const res = await fetch(`/api/wiki/card/${encodeURIComponent(slug)}`);
+  if (!res.ok) { resultsDiv.innerHTML = '<div class="msg">Card not found</div>'; return; }
+  const card = await res.json();
+
+  document.title = `${card.japanese || slug} — jdict`;
+
+  const imageHtml = card.image
+    ? `<div style="margin:8px 0"><img src="/wiki/images/${escHtml(card.image)}" alt="" style="max-width:100%;border-radius:4px"></div>`
+    : '';
+
+  const notesHtml = card.notesHtml?.trim()
+    ? `<div class="wiki-notes-rendered">${card.notesHtml}</div>`
+    : '';
+
+  resultsDiv.innerHTML = `
+    <div class="entry-detail">
+      <div class="entry-head">
+        <span class="kanji">${escHtml(card.japanese || slug)}</span>
+        <span class="kana">${escHtml(card.reading || '')}</span>
+      </div>
+      <div class="senses"><div class="sense-row"><span class="gloss">${escHtml(card.english || '')}</span></div></div>
+    </div>
+    ${imageHtml}
+    ${notesHtml}
+  `;
+}
+
+async function renderKanaPage(char) {
+  setMeta(`<a href="/wiki">← Wiki</a>`);
+  paginationDiv.innerHTML = '';
+  resultsDiv.innerHTML = '<div class="loading">Loading…</div>';
+
+  const data = await fetch(`/api/wiki/kana/${encodeURIComponent(char)}`).then(r => r.json());
+
+  let html = `<div style="font-size:22px;font-weight:bold;margin:12px 0 8px">${escHtml(data.char)} — Index</div>`;
+
+  if (data.words.length) {
+    html += `<div class="section-label">Words (${data.words.length})</div>`;
+    html += `<div class="kana-word-list">${data.words.map(w =>
+      `<a href="/wiki/word/${encodeURIComponent(w.slug)}" class="kana-word-entry">
+        <span class="kana-word-slug">${escHtml(w.slug)}</span>
+        <span class="kana-word-reading">${escHtml(w.reading)}</span>
+      </a>`
+    ).join('')}</div>`;
+  }
+
+  if (data.cards.length) {
+    html += `<div class="section-label">Cards (${data.cards.length})</div>`;
+    html += `<div class="kana-word-list">${data.cards.map(c =>
+      `<a href="/wiki/card/${encodeURIComponent(c.slug)}" class="kana-word-entry">
+        <span class="kana-word-slug">${escHtml(c.japanese || c.slug)}</span>
+        <span class="kana-word-reading">${escHtml(c.reading)}</span>
+        <span class="kana-word-english">${escHtml(c.english)}</span>
+      </a>`
+    ).join('')}</div>`;
+  }
+
+  if (!data.words.length && !data.cards.length) {
+    html += '<p class="wiki-none">No entries for this character.</p>';
+  }
+
+  resultsDiv.innerHTML = html;
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
@@ -1024,6 +1126,16 @@ async function router() {
 
   } else if (parts[0] === 'wiki' && parts[1] === 'word' && parts[2]) {
     await renderWikiWordPage(decodeURIComponent(parts[2]));
+
+  } else if (parts[0] === 'wiki' && parts[1] === 'card' && parts[2]) {
+    await renderWikiCardPage(decodeURIComponent(parts[2]));
+
+  } else if (parts[0] === 'wiki' && parts[1] === 'kana' && parts[2]) {
+    await renderKanaPage(decodeURIComponent(parts[2]));
+
+  } else if (parts[0] === 'wiki' && parts[1] === 'kana') {
+    history.replaceState({}, '', '/wiki');
+    await renderWikiIndexPage();
 
   } else if (parts[0] === 'wiki' && parts[1] === 'tag' && parts[2]) {
     await renderWikiTagPage(decodeURIComponent(parts[2]));
