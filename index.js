@@ -52,6 +52,8 @@ app.use('/api', (req, res, next) => {
 
 // Serve static files (the frontend)
 app.use('/static', express.static(path.join(__dirname, 'static')));
+// Serve PWA assets at root
+app.use(express.static(path.join(__dirname, 'static'), { index: false }));
 // Serve wiki images
 app.use('/wiki/images', express.static(path.join(__dirname, 'wiki', 'images')));
 
