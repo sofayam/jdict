@@ -1,244 +1,226 @@
 /**
- * wiki.js -- Data access layer for the wiki functionality
+ * wiki.js -- Data access layer for the wiki (SQLite-backed).
+ *
+ * All functions are synchronous (better-sqlite3).
+ * Images remain on disk under wiki/images/ — everything else lives in data/wiki.db.
  */
 
-const fs = require('fs').promises;
+const Database = require('better-sqlite3');
 const path = require('path');
-const matter = require('gray-matter');
+const fs = require('fs');
 
-const WIKI_PATH = path.join(__dirname, 'wiki');
-const WORDS_PATH = path.join(WIKI_PATH, 'words');
-const TAGS_PATH = path.join(WIKI_PATH, 'tags');
-const IMAGES_PATH = path.join(WIKI_PATH, 'images');
-const CARDS_PATH = path.join(WIKI_PATH, 'cards');
+const WIKI_DB_PATH = path.join(__dirname, 'data', 'wiki.db');
 
-/**
- * Ensures that the necessary wiki directories exist.
- */
-async function ensureWikiDirectories() {
-  await fs.mkdir(WORDS_PATH, { recursive: true });
-  await fs.mkdir(TAGS_PATH, { recursive: true });
-  await fs.mkdir(IMAGES_PATH, { recursive: true });
+let _db = null;
+
+function getWikiDb() {
+  if (_db) return _db;
+  fs.mkdirSync(path.dirname(WIKI_DB_PATH), { recursive: true });
+  _db = new Database(WIKI_DB_PATH);
+  _db.pragma('journal_mode = WAL');
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS wiki_words (
+      slug       TEXT PRIMARY KEY,
+      seq        INTEGER,
+      tags       TEXT NOT NULL DEFAULT '[]',
+      image      TEXT,
+      contexts   TEXT NOT NULL DEFAULT '[]',
+      notes      TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS wiki_cards (
+      slug       TEXT PRIMARY KEY,
+      english    TEXT NOT NULL DEFAULT '',
+      japanese   TEXT NOT NULL DEFAULT '',
+      reading    TEXT NOT NULL DEFAULT '',
+      image      TEXT NOT NULL DEFAULT '',
+      notes      TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS wiki_tags (
+      name       TEXT PRIMARY KEY,
+      notes      TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+  return _db;
 }
 
-// Call it once when the module loads
-ensureWikiDirectories().catch(console.error);
+// ─────────────────────────────────────────────
+// Slug utility
+// ─────────────────────────────────────────────
 
-/**
- * Creates a URL- and filename-safe slug from a given text.
- * Handles Japanese characters by keeping them, and replacing problematic characters with hyphens.
- * @param {string} text The text to slugify.
- * @returns {string} The slugified text.
- */
 function slugify(text) {
   return text
     .toString()
     .trim()
-    .replace(/[\s\/\?#%&]+/g, '-') // Replace spaces, slashes, etc. with a single hyphen
-    .replace(/[^a-zA-Z0-9\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\u3400-\u4DBF-]+/g, '') // Remove characters not in allowed ranges
-    .replace(/--+/g, '-'); // Replace multiple hyphens with a single hyphen
+    .replace(/[\s\/\?#%&]+/g, '-')
+    .replace(/[^a-zA-Z0-9\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\u3400-\u4DBF-]+/g, '')
+    .replace(/--+/g, '-');
 }
 
-/**
- * Retrieves a word page.
- * @param {string} word The slugified word.
- * @returns {object | null} The parsed word page data or null if not found.
- */
-async function getWordPage(word) {
-  const filePath = path.join(WORDS_PATH, `${word}.md`);
-  try {
-    const fileContent = await fs.readFile(filePath, 'utf8');
-    const { data, content } = matter(fileContent);
-    return {
-      word,
-      ...data,
-      notes: content,
-    };
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null; // File doesn't exist
-    }
-    throw error;
-  }
-}
+// ─────────────────────────────────────────────
+// Word pages
+// ─────────────────────────────────────────────
 
-/**
- * Saves a word page, and ensures corresponding tag pages exist.
- * @param {string} word The slugified word.
- * @param {object} pageData The data to save.
- */
-async function saveWordPage(word, pageData) {
-  const { notes, ...frontMatter } = pageData;
-  const fileContent = matter.stringify(notes || '', frontMatter);
-  const filePath = path.join(WORDS_PATH, `${word}.md`);
-  await fs.writeFile(filePath, fileContent, 'utf8');
-
-  // Ensure tag files exist and update their modification time
-  if (frontMatter.tags && Array.isArray(frontMatter.tags)) {
-    for (const tag of frontMatter.tags) {
-      const tagFilePath = path.join(TAGS_PATH, `${tag}.md`);
-      try {
-        // "touch" the file to update mtime
-        const now = new Date();
-        await fs.utimes(tagFilePath, now, now);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          // if it doesn't exist, create it
-          const defaultTagContent = matter.stringify(`# ${tag}\n\n`, {});
-          await fs.writeFile(tagFilePath, defaultTagContent, 'utf8');
-        } else {
-          throw error;
-        }
-      }
-    }
-  }
-}
-
-/**
- * Gets all unique tags from all word pages.
- * @returns {Promise<string[]>} A list of unique tags.
- */
-async function getAllTags() {
-  const files = await fs.readdir(WORDS_PATH);
-  const allTags = new Set();
-
-  for (const file of files) {
-    if (path.extname(file) === '.md') {
-      const filePath = path.join(WORDS_PATH, file);
-      const fileContent = await fs.readFile(filePath, 'utf8');
-      const { data } = matter(fileContent);
-      if (data.tags && Array.isArray(data.tags)) {
-        data.tags.forEach(tag => allTags.add(tag));
-      }
-    }
-  }
-
-  return Array.from(allTags).sort();
-}
-
-/**
- * Gets lists of words and tags sorted by creation and modification date.
- * @returns {Promise<object>} An object containing the four sorted lists.
- */
-async function getWikiIndexData() {
-  async function getDirStats(dirPath) {
-    const files = await fs.readdir(dirPath);
-    const stats = [];
-    for (const file of files) {
-      if (path.extname(file) === '.md') {
-        const stat = await fs.stat(path.join(dirPath, file));
-        stats.push({
-          name: path.basename(file, '.md'),
-          mtime: stat.mtime,
-          birthtime: stat.birthtime,
-        });
-      }
-    }
-    return stats;
-  }
-
-  const wordStats = await getDirStats(WORDS_PATH);
-  const tagStats = await getDirStats(TAGS_PATH);
-
-  const sortBy = (key) => (a, b) => b[key].getTime() - a[key].getTime();
-
+function getWordPage(slug) {
+  const row = getWikiDb().prepare('SELECT * FROM wiki_words WHERE slug = ?').get(slug);
+  if (!row) return null;
   return {
-    wordsByModified: wordStats.sort(sortBy('mtime')).slice(0, 20),
-    wordsByCreated: wordStats.sort(sortBy('birthtime')).slice(0, 20),
-    tagsByModified: tagStats.sort(sortBy('mtime')).slice(0, 20),
-    tagsByCreated: tagStats.sort(sortBy('birthtime')).slice(0, 20),
+    word: row.slug,
+    seq: row.seq,
+    tags: JSON.parse(row.tags),
+    image: row.image || '',
+    contexts: JSON.parse(row.contexts),
+    notes: row.notes || '',
   };
 }
 
-async function getTagPage(tagName) {
-  const filePath = path.join(TAGS_PATH, `${tagName}.md`);
-  try {
-    const fileContent = await fs.readFile(filePath, 'utf8');
-    const { data, content } = matter(fileContent);
-    return {
-      name: tagName,
-      ...data,
-      notes: content,
-    };
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
+function wordExists(slug) {
+  return !!getWikiDb().prepare('SELECT 1 FROM wiki_words WHERE slug = ?').get(slug);
 }
 
-async function getWordsForTag(tagName) {
-  const words = [];
-  const files = await fs.readdir(WORDS_PATH);
-  for (const file of files) {
-    if (path.extname(file) === '.md') {
-      const filePath = path.join(WORDS_PATH, file);
-      const fileContent = await fs.readFile(filePath, 'utf8');
-      const { data } = matter(fileContent);
-      if (data.tags && data.tags.includes(tagName)) {
-        words.push({
-          name: path.basename(file, '.md'),
-        });
-      }
-    }
+function saveWordPage(slug, pageData) {
+  const db = getWikiDb();
+  const { notes, tags, contexts, seq, image } = pageData;
+
+  if (Array.isArray(tags) && tags.length > 0) {
+    const insertTag = db.prepare('INSERT OR IGNORE INTO wiki_tags (name) VALUES (?)');
+    for (const tag of tags) insertTag.run(tag);
   }
-  return words;
+
+  db.prepare(`
+    INSERT INTO wiki_words (slug, seq, tags, image, contexts, notes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(slug) DO UPDATE SET
+      seq        = excluded.seq,
+      tags       = excluded.tags,
+      image      = excluded.image,
+      contexts   = excluded.contexts,
+      notes      = excluded.notes,
+      updated_at = datetime('now')
+  `).run(
+    slug,
+    seq ?? null,
+    JSON.stringify(tags || []),
+    image || null,
+    JSON.stringify(contexts || []),
+    notes || ''
+  );
 }
 
-async function getWikiBrowseData() {
-  const files = await fs.readdir(WORDS_PATH);
-  const mdFiles = files.filter(f => path.extname(f) === '.md');
+// ─────────────────────────────────────────────
+// Tag pages
+// ─────────────────────────────────────────────
 
-  const allWords = [];
-  const tagCounts = {};
+function getAllTags() {
+  return getWikiDb().prepare('SELECT name FROM wiki_tags ORDER BY name').all().map(r => r.name);
+}
+
+function getTagPage(tagName) {
+  const row = getWikiDb().prepare('SELECT * FROM wiki_tags WHERE name = ?').get(tagName);
+  if (!row) return null;
+  return { name: row.name, notes: row.notes || '' };
+}
+
+function getWordsForTag(tagName) {
+  return getWikiDb().prepare(`
+    SELECT slug FROM wiki_words
+    WHERE EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)
+    ORDER BY slug
+  `).all(tagName).map(r => ({ name: r.slug }));
+}
+
+function saveTagPage(tagName, pageData) {
+  getWikiDb().prepare(`
+    INSERT INTO wiki_tags (name, notes, created_at, updated_at)
+    VALUES (?, ?, datetime('now'), datetime('now'))
+    ON CONFLICT(name) DO UPDATE SET
+      notes      = excluded.notes,
+      updated_at = datetime('now')
+  `).run(tagName, pageData.notes || '');
+}
+
+// ─────────────────────────────────────────────
+// Card pages
+// ─────────────────────────────────────────────
+
+function getCardPage(slug) {
+  const row = getWikiDb().prepare('SELECT * FROM wiki_cards WHERE slug = ?').get(slug);
+  if (!row) return null;
+  return {
+    type: 'card',
+    slug: row.slug,
+    english: row.english,
+    japanese: row.japanese,
+    reading: row.reading,
+    image: row.image,
+    notes: row.notes,
+  };
+}
+
+// ─────────────────────────────────────────────
+// Index / browse queries
+// ─────────────────────────────────────────────
+
+function getWikiIndexData() {
+  const db = getWikiDb();
+  return {
+    wordsByModified: db.prepare('SELECT slug as name, updated_at as mtime, created_at as birthtime FROM wiki_words ORDER BY updated_at DESC LIMIT 20').all(),
+    wordsByCreated:  db.prepare('SELECT slug as name, updated_at as mtime, created_at as birthtime FROM wiki_words ORDER BY created_at DESC LIMIT 20').all(),
+    tagsByModified:  db.prepare('SELECT name, updated_at as mtime, created_at as birthtime FROM wiki_tags ORDER BY updated_at DESC LIMIT 20').all(),
+    tagsByCreated:   db.prepare('SELECT name, updated_at as mtime, created_at as birthtime FROM wiki_tags ORDER BY created_at DESC LIMIT 20').all(),
+  };
+}
+
+function getWikiBrowseData() {
+  const db = getWikiDb();
+
+  const allWords = db.prepare('SELECT slug FROM wiki_words').all()
+    .map(r => r.slug)
+    .sort((a, b) => a.localeCompare(b, 'ja'));
+
+  const tags = db.prepare(`
+    SELECT tag.value as name, COUNT(*) as count
+    FROM wiki_words, json_each(tags) as tag
+    GROUP BY tag.value
+    ORDER BY count DESC
+  `).all();
+
+  const ctxRows = db.prepare(`
+    SELECT w.slug, ctx.value as ctx_json
+    FROM wiki_words w, json_each(w.contexts) as ctx
+    WHERE json_extract(ctx.value, '$.podcast') IS NOT NULL
+  `).all();
+
   const episodeMap = {};
+  const seenPerWord = {};
   let earliest = '';
   let latest = '';
 
-  for (const file of mdFiles) {
-    const word = path.basename(file, '.md');
-    allWords.push(word);
+  for (const row of ctxRows) {
+    const ctx = JSON.parse(row.ctx_json);
+    if (!ctx.podcast || !ctx.episode) continue;
+    const key = `${ctx.podcast}\x00${ctx.episode}`;
+    if (!seenPerWord[row.slug]) seenPerWord[row.slug] = new Set();
+    if (seenPerWord[row.slug].has(key)) continue;
+    seenPerWord[row.slug].add(key);
 
-    const fileContent = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
-    const { data } = matter(fileContent);
-
-    if (Array.isArray(data.tags)) {
-      for (const tag of data.tags) {
-        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
-      }
+    if (!episodeMap[key]) {
+      episodeMap[key] = { podcast: ctx.podcast, episode: ctx.episode, latestTimestamp: '', words: [] };
     }
-
-    if (Array.isArray(data.contexts)) {
-      const seenInThisWord = new Set();
-      for (const ctx of data.contexts) {
-        if (!ctx.podcast || !ctx.episode) continue;
-        const key = `${ctx.podcast}\x00${ctx.episode}`;
-        if (seenInThisWord.has(key)) continue;
-        seenInThisWord.add(key);
-
-        if (!episodeMap[key]) {
-          episodeMap[key] = { podcast: ctx.podcast, episode: ctx.episode, latestTimestamp: '', words: [] };
-        }
-        episodeMap[key].words.push(word);
-        if ((ctx.timestamp || '') > episodeMap[key].latestTimestamp) {
-          episodeMap[key].latestTimestamp = ctx.timestamp || '';
-        }
-        if (ctx.timestamp) {
-          if (!earliest || ctx.timestamp < earliest) earliest = ctx.timestamp;
-          if (!latest   || ctx.timestamp > latest)   latest   = ctx.timestamp;
-        }
-      }
+    episodeMap[key].words.push(row.slug);
+    if ((ctx.timestamp || '') > episodeMap[key].latestTimestamp) {
+      episodeMap[key].latestTimestamp = ctx.timestamp || '';
+    }
+    if (ctx.timestamp) {
+      if (!earliest || ctx.timestamp < earliest) earliest = ctx.timestamp;
+      if (!latest   || ctx.timestamp > latest)   latest   = ctx.timestamp;
     }
   }
 
-  allWords.sort((a, b) => a.localeCompare(b, 'ja'));
-
-  const tags = Object.entries(tagCounts)
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
-
-  // Group episodes by podcast
   const podcastMap = {};
   for (const ep of Object.values(episodeMap)) {
     if (!podcastMap[ep.podcast]) {
@@ -260,35 +242,10 @@ async function getWikiBrowseData() {
   return { words: allWords, tags, podcasts, stats };
 }
 
-async function wordExists(word) {
-  try {
-    await fs.access(path.join(WORDS_PATH, `${word}.md`));
-    return true;
-  } catch {
-    return false;
-  }
-}
+// ─────────────────────────────────────────────
+// Kana index
+// ─────────────────────────────────────────────
 
-async function saveTagPage(tagName, pageData) {
-  const { notes, ...frontMatter } = pageData;
-  const fileContent = matter.stringify(notes || '', frontMatter);
-  const filePath = path.join(TAGS_PATH, `${tagName}.md`);
-  await fs.writeFile(filePath, fileContent, 'utf8');
-}
-
-async function getCardPage(slug) {
-  const filePath = path.join(CARDS_PATH, `${slug}.md`);
-  try {
-    const fileContent = await fs.readFile(filePath, 'utf8');
-    const { data, content } = matter(fileContent);
-    return { ...data, slug, notes: content };
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-// Convert a single katakana char to hiragana; leave hiragana unchanged.
 function toHira(ch) {
   const code = ch.charCodeAt(0);
   return (code >= 0x30A1 && code <= 0x30F6) ? String.fromCharCode(code - 0x60) : ch;
@@ -298,68 +255,58 @@ function firstKanaChar(reading) {
   return reading ? toHira(reading[0]) : '';
 }
 
-// Returns { words: { "あ": N, ... }, cards: { "あ": N, ... } }
-async function getKanaIndex(db) {
-  const wordFiles = await fs.readdir(WORDS_PATH).catch(() => []);
-  const wordCounts = {};
-  const stmt = db.prepare('SELECT kana_json FROM entries WHERE seq = ?');
+// jdictDb is the better-sqlite3 handle for data/jdict.db, passed in by the caller.
+function getKanaIndex(jdictDb) {
+  const db = getWikiDb();
 
-  for (const file of wordFiles) {
-    if (path.extname(file) !== '.md') continue;
-    const content = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
-    const { data } = matter(content);
-    if (!data.seq) continue;
-    const row = stmt.get(data.seq);
-    if (!row) continue;
-    const kana = JSON.parse(row.kana_json);
-    const ch = firstKanaChar(kana[0]?.reb || '');
-    if (ch) wordCounts[ch] = (wordCounts[ch] || 0) + 1;
+  const wordCounts = {};
+  const wordRows = db.prepare('SELECT seq FROM wiki_words WHERE seq IS NOT NULL').all();
+  if (wordRows.length > 0) {
+    const seqs = wordRows.map(r => r.seq);
+    const placeholders = seqs.map(() => '?').join(',');
+    for (const e of jdictDb.prepare(`SELECT kana_json FROM entries WHERE seq IN (${placeholders})`).all(...seqs)) {
+      const kana = JSON.parse(e.kana_json);
+      const ch = firstKanaChar(kana[0]?.reb || '');
+      if (ch) wordCounts[ch] = (wordCounts[ch] || 0) + 1;
+    }
   }
 
-  const cardFiles = await fs.readdir(CARDS_PATH).catch(() => []);
   const cardCounts = {};
-  for (const file of cardFiles) {
-    if (path.extname(file) !== '.md') continue;
-    const content = await fs.readFile(path.join(CARDS_PATH, file), 'utf8');
-    const { data } = matter(content);
-    const ch = firstKanaChar(data.reading || '');
+  for (const row of db.prepare('SELECT reading FROM wiki_cards').all()) {
+    const ch = firstKanaChar(row.reading || '');
     if (ch) cardCounts[ch] = (cardCounts[ch] || 0) + 1;
   }
 
   return { words: wordCounts, cards: cardCounts };
 }
 
-// Returns { char, words: [{slug, reading}], cards: [{slug, reading, english, japanese}] }
-async function getKanaWords(db, char) {
+function getKanaWords(jdictDb, char) {
+  const db = getWikiDb();
   const hira = toHira(char);
-  const stmt = db.prepare('SELECT kana_json FROM entries WHERE seq = ?');
 
-  const wordFiles = await fs.readdir(WORDS_PATH).catch(() => []);
   const words = [];
-  for (const file of wordFiles) {
-    if (path.extname(file) !== '.md') continue;
-    const slug = path.basename(file, '.md');
-    const content = await fs.readFile(path.join(WORDS_PATH, file), 'utf8');
-    const { data } = matter(content);
-    if (!data.seq) continue;
-    const row = stmt.get(data.seq);
-    if (!row) continue;
-    const kana = JSON.parse(row.kana_json);
-    const reading = kana[0]?.reb || '';
-    if (firstKanaChar(reading) === hira) words.push({ slug, reading });
+  const wordRows = db.prepare('SELECT slug, seq FROM wiki_words WHERE seq IS NOT NULL').all();
+  if (wordRows.length > 0) {
+    const seqs = wordRows.map(r => r.seq);
+    const placeholders = seqs.map(() => '?').join(',');
+    const entryMap = {};
+    for (const e of jdictDb.prepare(`SELECT seq, kana_json FROM entries WHERE seq IN (${placeholders})`).all(...seqs)) {
+      entryMap[e.seq] = e.kana_json;
+    }
+    for (const row of wordRows) {
+      const kanaJson = entryMap[row.seq];
+      if (!kanaJson) continue;
+      const kana = JSON.parse(kanaJson);
+      const reading = kana[0]?.reb || '';
+      if (firstKanaChar(reading) === hira) words.push({ slug: row.slug, reading });
+    }
   }
   words.sort((a, b) => a.reading.localeCompare(b.reading, 'ja'));
 
-  const cardFiles = await fs.readdir(CARDS_PATH).catch(() => []);
   const cards = [];
-  for (const file of cardFiles) {
-    if (path.extname(file) !== '.md') continue;
-    const slug = path.basename(file, '.md');
-    const content = await fs.readFile(path.join(CARDS_PATH, file), 'utf8');
-    const { data } = matter(content);
-    const reading = data.reading || '';
-    if (firstKanaChar(reading) === hira) {
-      cards.push({ slug, reading, english: data.english || '', japanese: data.japanese || '' });
+  for (const row of db.prepare('SELECT slug, reading, english, japanese FROM wiki_cards').all()) {
+    if (firstKanaChar(row.reading || '') === hira) {
+      cards.push({ slug: row.slug, reading: row.reading, english: row.english, japanese: row.japanese });
     }
   }
   cards.sort((a, b) => a.reading.localeCompare(b.reading, 'ja'));
