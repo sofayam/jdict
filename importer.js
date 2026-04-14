@@ -188,7 +188,7 @@ function importJmdict(xmlPath, dbPath) {
 }
 
 const args = require('minimist')(process.argv.slice(2));
-const xmlPath = args.xml || 'data/JMdict';
+const xmlPath = args.xml || 'sources/JMDict';
 const dbPath = args.db || 'data/jdict.db';
 
 if (!fs.existsSync(xmlPath)) {

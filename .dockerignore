@@ -1,5 +1,6 @@
 node_modules
 data/
+sources/
 wiki/
 .git
 .DS_Store

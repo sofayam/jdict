@@ -15,12 +15,20 @@ npm start          # node index.js, serves on port 8000
 npm run dev        # nodemon index.js
 
 # Import JMdict XML into the SQLite database (one-time setup)
-node importer.js --xml data/JMdict --db data/jdict.db
+node importer.js --xml sources/JMDict --db data/jdict.db
+
+# Import KANJIDIC2 + KRADFILE into jdict.db (one-time setup)
+node kanjiimporter.js
 
 # Import an Anki .apkg deck into the wiki (one-time or repeated)
 node ankiimport.js file.apkg
 node ankiimport.js file.apkg --limit 50   # test with a small batch first
+
+# Re-download all source data and rebuild jdict.db from scratch
+make rebuild   # see Makefile for download URLs
 ```
+
+`data/` contains only the two databases (`jdict.db`, `wiki.db`) — both gitignored. `sources/` contains downloaded source files used to build `jdict.db` — also gitignored. `jdict.db` is fully reproducible via `make rebuild`. `wiki.db` and `wiki/images/` are irreplaceable personal data — back them up separately (`make backup DEST=/path/to/backup`).
 
 There are no automated tests (`npm test` exits with an error).
 
@@ -37,7 +45,7 @@ make logs    # tail logs
 
 The port is read from `config.json` via `jq` in the `Makefile` — it is the single source of truth. Do not hardcode ports in `Dockerfile` or `docker-compose.yml`.
 
-`data/` and `wiki/` are mounted from the host (paths defined in `docker-compose.yml`) and never baked into the image.
+`data/`, `sources/`, and `wiki/` are mounted from the host (paths defined in `docker-compose.yml`) and never baked into the image.
 
 ## Architecture
 
@@ -45,7 +53,7 @@ This is a Node.js/Express app (migrated from a Python/FastAPI origin — the `at
 
 - **`index.js`** — Express server, all route definitions. Serves the frontend SPA and the REST API under `/api/`.
 - **`db.js`** — SQLite access layer using `better-sqlite3`. Synchronous reads; the DB is opened lazily on first access. Contains search logic (Japanese kana/kanji LIKE queries, FTS5 for English glosses).
-- **`wiki.js`** — File-based wiki system using `gray-matter` for markdown+frontmatter. Word and tag pages are stored as `.md` files under `wiki/words/` and `wiki/tags/`. Card pages are stored under `wiki/cards/`. Images are stored in `wiki/images/` and served statically.
+- **`wiki.js`** — SQLite-backed wiki system (`data/wiki.db`). Word pages, card pages, tags, and contexts are all stored in the database. Images remain on disk under `wiki/images/` and are served statically.
 - **`importer.js`** — One-time JMdict XML → SQLite converter using `fast-xml-parser`. Creates the `entries`, `entries_text`, and `entries_fts` (FTS5) tables.
 - **`ankiimport.js`** — One-time Anki `.apkg` → wiki importer. Handles the modern Anki format (zstd-compressed `collection.anki21b` and `media` file with protobuf map). For each note: if the Japanese field matches a JMdict entry, creates/updates a wiki word page (adds `anki` tag, image, story under `# Example`); otherwise writes a card page to `wiki/cards/`. Run with `node ankiimport.js file.apkg [--limit N]`.
 - **`static/index.html`** — The entire frontend as a single self-contained HTML file (no build step). Implements client-side routing via `history.pushState`. Views: search, entry detail, wiki index, word page, tag page, card page, kana index.
@@ -60,9 +68,9 @@ Three tables in `data/jdict.db`:
 
 ### Wiki format
 
-Word and tag pages are markdown files with YAML frontmatter (via `gray-matter`). Frontmatter fields on word pages include `tags` (array), `seq` (JMdict sequence number), `image` (filename), and `contexts` (array of lookup records). The `notes` field maps to the markdown body. Tag pages are auto-created when a word page references a new tag.
+Wiki data lives in `data/wiki.db`. The `wiki_words` table stores word pages: `slug`, `seq` (JMdict sequence number), `tags` (JSON array), `image` (filename), `contexts` (JSON array of lookup records), and `notes` (markdown body). Tag pages are auto-created when a word page references a new tag.
 
-Card pages (`wiki/cards/*.md`) are created by `ankiimport.js` for Anki notes whose Japanese field does not match any JMdict entry. Frontmatter fields: `type: card`, `slug`, `english`, `japanese`, `reading`, `image`. The markdown body holds the story text. Card pages are read-only (no edit UI); served at `/wiki/card/:slug` via `GET /api/wiki/card/:slug`.
+Card pages are stored in the `wiki_cards` table and created by `ankiimport.js` for Anki notes whose Japanese field does not match any JMdict entry. Fields: `slug`, `english`, `japanese`, `reading`, `image`, `notes`. Card pages are read-only (no edit UI); served at `/wiki/card/:slug` via `GET /api/wiki/card/:slug`.
 
 Each entry in `contexts` has:
 - `source` — a URL or `entry:{seq}` string

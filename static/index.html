@@ -332,6 +332,97 @@
     font-size: 17px;
   }
   .word-chips a:hover { background: var(--border); }
+
+  /* ── Kanji tap buttons ───────────────────────────────────────────────── */
+  .kanji-tap {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 3px;
+    -webkit-tap-highlight-color: rgba(0,51,187,0.15);
+  }
+  .kanji-tap:active { background: rgba(0,51,187,0.12); }
+
+  /* ── Kanji bottom sheet ──────────────────────────────────────────────── */
+  #kanji-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 100;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #kanji-backdrop.open { display: block; }
+
+  #kanji-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -2px 20px rgba(0,0,0,0.15);
+    z-index: 101;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+    max-height: 82vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  #kanji-sheet.open { transform: translateY(0); }
+
+  .sheet-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 10px auto 4px;
+  }
+
+  #kanji-sheet-body { padding: 4px 24px 16px; }
+
+  .kanji-sheet-char {
+    font-size: 56px;
+    font-weight: bold;
+    text-align: center;
+    line-height: 1.1;
+    margin-bottom: 2px;
+  }
+
+  .kanji-sheet-svg {
+    text-align: center;
+    margin: 6px 0 14px;
+  }
+  .kanji-sheet-svg svg { width: 160px; height: 160px; }
+
+  .kanji-reading-row {
+    font-size: 16px;
+    line-height: 1.5;
+    margin-bottom: 4px;
+  }
+  .kanji-reading-label {
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-right: 8px;
+  }
+  .kanji-meanings {
+    font-size: 15px;
+    margin: 10px 0 8px;
+    line-height: 1.5;
+  }
+  .kanji-meta {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .kanji-components { font-size: 15px; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -349,6 +440,12 @@
   <div id="pagination"></div>
   <datalist id="tags-list"></datalist>
 </main>
+
+<div id="kanji-backdrop"></div>
+<div id="kanji-sheet" role="dialog" aria-modal="true">
+  <div class="sheet-handle"></div>
+  <div id="kanji-sheet-body"></div>
+</div>
 
 <script>
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -725,7 +822,7 @@ async function renderWikiWordPage(slug) {
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
-        <span class="kanji">${entry ? (entry.kanji.map(k => k.keb).join('、') || entry.kana.map(k => k.reb).join('、')) : displayName}</span>
+        <span class="kanji">${entry ? (entry.kanji.map(k => wrapKanji(k.keb)).join('、') || entry.kana.map(k => k.reb).join('、')) : wrapKanji(displayName)}</span>
         ${entry?.kanji.length ? `<span class="kana">${entry.kana.map(k => k.reb).join('、')}</span>` : ''}
       </div>
       ${entry ? renderSenses(entry.senses) : ''}
@@ -1040,7 +1137,7 @@ async function renderWikiCardPage(slug) {
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
-        <span class="kanji">${escHtml(card.japanese || slug)}</span>
+        <span class="kanji">${wrapKanji(card.japanese || slug)}</span>
         <span class="kana">${escHtml(card.reading || '')}</span>
       </div>
       <div class="senses"><div class="sense-row"><span class="gloss">${escHtml(card.english || '')}</span></div></div>
@@ -1096,6 +1193,115 @@ function setMeta(html) {
 function escHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// ─── Kanji drill-down ─────────────────────────────────────────────────────────
+
+function wrapKanji(text) {
+  return [...text].map(ch => {
+    const cp = ch.codePointAt(0);
+    if ((cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3400 && cp <= 0x4dbf)) {
+      return `<button class="kanji-tap" data-char="${escHtml(ch)}">${escHtml(ch)}</button>`;
+    }
+    return escHtml(ch);
+  }).join('');
+}
+
+function animateKanjiSvg(svgEl) {
+  const strokesGroup = svgEl.querySelector('[id^="kvg:StrokePaths"]');
+  const numbersGroup = svgEl.querySelector('[id^="kvg:StrokeNumbers"]');
+  if (!strokesGroup) return;
+
+  const paths = Array.from(strokesGroup.querySelectorAll('path'));
+  const strokeDuration = 300;
+  const strokeGap = 60;
+
+  if (numbersGroup) numbersGroup.style.opacity = '0';
+
+  paths.forEach(path => {
+    const len = path.getTotalLength();
+    path.style.strokeDasharray = `${len}`;
+    path.style.strokeDashoffset = `${len}`;
+  });
+
+  paths.forEach((path, i) => {
+    const len = path.getTotalLength();
+    path.animate(
+      [{ strokeDashoffset: `${len}` }, { strokeDashoffset: '0' }],
+      { duration: strokeDuration, delay: i * (strokeDuration + strokeGap), fill: 'forwards', easing: 'ease-in-out' }
+    );
+  });
+
+  if (numbersGroup) {
+    setTimeout(() => {
+      numbersGroup.style.transition = 'opacity 0.4s';
+      numbersGroup.style.opacity = '1';
+    }, paths.length * (strokeDuration + strokeGap) + 100);
+  }
+}
+
+function closeKanjiSheet() {
+  document.getElementById('kanji-sheet').classList.remove('open');
+  document.getElementById('kanji-backdrop').classList.remove('open');
+}
+
+async function showKanjiSheet(char) {
+  const sheet    = document.getElementById('kanji-sheet');
+  const body     = document.getElementById('kanji-sheet-body');
+  const backdrop = document.getElementById('kanji-backdrop');
+
+  body.innerHTML = '<div class="loading">Loading…</div>';
+  sheet.classList.add('open');
+  backdrop.classList.add('open');
+
+  let data;
+  try {
+    const res = await fetch(`/api/kanji/${encodeURIComponent(char)}`);
+    if (!res.ok) { body.innerHTML = `<div class="kanji-sheet-char">${escHtml(char)}</div><div class="msg" style="padding:16px 0">No data for this character</div>`; return; }
+    data = await res.json();
+  } catch {
+    body.innerHTML = '<div class="msg">Failed to load</div>';
+    return;
+  }
+
+  const jlptLabel  = data.jlpt  ? `N${data.jlpt}` : '';
+  const gradeLabel = data.grade ? `Grade ${data.grade}` : '';
+  const strokeLabel = data.stroke_count ? `${data.stroke_count} strokes` : '';
+  const meta = [strokeLabel, gradeLabel, jlptLabel].filter(Boolean).join(' · ');
+
+  body.innerHTML = `
+    <div class="kanji-sheet-char">${escHtml(char)}</div>
+    <div class="kanji-sheet-svg" id="kanji-svg-slot"></div>
+    ${data.on?.length  ? `<div class="kanji-reading-row"><span class="kanji-reading-label">On</span>${data.on.join('　')}</div>` : ''}
+    ${data.kun?.length ? `<div class="kanji-reading-row"><span class="kanji-reading-label">Kun</span>${data.kun.join('　')}</div>` : ''}
+    ${data.meanings?.length ? `<div class="kanji-meanings">${data.meanings.map(escHtml).join(' · ')}</div>` : ''}
+    ${meta ? `<div class="kanji-meta">${escHtml(meta)}</div>` : ''}
+    ${data.components?.length ? `<div class="kanji-components"><span class="kanji-reading-label">Parts</span>${data.components.map(escHtml).join(' ')}</div>` : ''}
+  `;
+
+  if (data.svg_path) {
+    fetch(data.svg_path).then(r => r.text()).then(svgText => {
+      const slot = document.getElementById('kanji-svg-slot');
+      if (!slot) return;
+      const svgDoc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+      const svgEl  = svgDoc.querySelector('svg');
+      if (!svgEl) return;
+      slot.appendChild(document.importNode(svgEl, true));
+      animateKanjiSvg(slot.querySelector('svg'));
+    }).catch(() => {});
+  }
+}
+
+document.getElementById('kanji-backdrop').addEventListener('click', closeKanjiSheet);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeKanjiSheet();
+});
+
+// Event delegation: kanji-tap buttons may be inside resultsDiv
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.kanji-tap');
+  if (btn) { e.preventDefault(); showKanjiSheet(btn.dataset.char); }
+});
 
 // ─── Search input ─────────────────────────────────────────────────────────────
 

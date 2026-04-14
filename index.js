@@ -56,6 +56,8 @@ app.use('/static', express.static(path.join(__dirname, 'static')));
 app.use(express.static(path.join(__dirname, 'static'), { index: false }));
 // Serve wiki images
 app.use('/wiki/images', express.static(path.join(__dirname, 'wiki', 'images')));
+// Serve KanjiVG stroke-order SVGs
+app.use('/kanjivg', express.static(path.join(__dirname, 'sources', 'kanjivg')));
 
 // ─────────────────────────────────────────────
 // Frontend
@@ -172,6 +174,24 @@ app.get('/api/jlpt/:level', (req, res) => {
 // ─────────────────────────────────────────────
 // Random entries
 // ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// Kanji lookup
+// ─────────────────────────────────────────────
+
+app.get('/api/kanji/:char', (req, res) => {
+  const char = req.params.char;
+  if (!char || [...char].length !== 1) {
+    return res.status(400).json({ error: 'Single character required' });
+  }
+  const data = database.getKanji(char);
+  if (!data) {
+    return res.status(404).json({ error: 'Kanji not found' });
+  }
+  const cp = char.codePointAt(0).toString(16).padStart(5, '0');
+  const svgFile = path.join(__dirname, 'sources', 'kanjivg', `${cp}.svg`);
+  res.json({ ...data, svg_path: fs.existsSync(svgFile) ? `/kanjivg/${cp}.svg` : null });
+});
 
 app.get('/api/random', (req, res) => {
   /** Return n random dictionary entries. */

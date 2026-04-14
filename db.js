@@ -12,11 +12,7 @@ let _db = null;
 
 function getDb() {
   if (!_db) {
-    if (!fs.existsSync(path.dirname(DB_PATH))) {
-      fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    }
-    _db = new Database(DB_PATH);
-    _db.pragma('journal_mode = WAL');
+    _db = new Database(DB_PATH, { readonly: true });
   }
   return _db;
 }
@@ -164,6 +160,24 @@ function entryCount() {
   return row ? row.c : 0;
 }
 
+function getKanji(char) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM kanji WHERE literal = ?').get(char);
+  if (!row) return null;
+  const comp = db.prepare('SELECT components_json FROM kanji_components WHERE kanji = ?').get(char);
+  return {
+    literal:     row.literal,
+    grade:       row.grade,
+    stroke_count: row.stroke_count,
+    freq:        row.freq,
+    jlpt:        row.jlpt,
+    on:          JSON.parse(row.on_json      || '[]'),
+    kun:         JSON.parse(row.kun_json     || '[]'),
+    meanings:    JSON.parse(row.meanings_json || '[]'),
+    components:  comp ? JSON.parse(comp.components_json) : [],
+  };
+}
+
 module.exports = {
   DB_PATH,
   dbExists,
@@ -173,4 +187,5 @@ module.exports = {
   getByJlpt,
   randomEntries,
   entryCount,
+  getKanji,
 };
