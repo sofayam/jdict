@@ -64,19 +64,22 @@ function search(q, lang = 'eng', limit = 20, offset = 0) {
   let rows;
 
   if (_isJapanese(q)) {
-    const exactPattern = `% ${q} %`;
-    const prefixPattern = `${q}%`;
+    // exactPattern: whole-word match anywhere in the space-separated column value
+    // searchPattern: word-boundary prefix match anywhere in the column
+    // Both prepend/append a space so LIKE can use % to anchor to a word boundary.
+    // This fixes katakana forms that aren't stored first in the kanji column
+    // (e.g. "こたつ布団 炬燵布団 コタツ布団" — searching コタツ must find this).
+    const exactPattern  = `% ${q} %`;
+    const searchPattern = `% ${q}%`;
 
-    // Unified query for exact and prefix matches.
-    // Exact matches are prioritized.
     rows = db.prepare(`
       SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json, e.jlpt,
         CASE WHEN (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?) THEN 1 ELSE 2 END as priority
       FROM entries e JOIN entries_text t ON t.seq = e.seq
-      WHERE (t.kanji LIKE ?) OR (t.kana LIKE ?)
+      WHERE (' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?)
       ORDER BY priority, e.seq
       LIMIT ? OFFSET ?
-    `).all(exactPattern, exactPattern, prefixPattern, prefixPattern, limit, offset);
+    `).all(exactPattern, exactPattern, searchPattern, searchPattern, limit, offset);
   } else {
     // FTS5 full-text search on English glosses
     // We try exact matches first for higher precision
