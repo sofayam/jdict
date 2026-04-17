@@ -20,6 +20,13 @@ node importer.js --xml sources/JMDict --db data/jdict.db
 # Import KANJIDIC2 + KRADFILE into jdict.db (one-time setup)
 node kanjiimporter.js
 
+# Import Tatoeba example sentences into data/tatoeba.db (one-time setup)
+# Also reads sources/tatoeba/jpn_transcriptions.tsv for furigana readings
+node tatoebaImporter.js
+
+# Add/refresh readings on an existing tatoeba.db (if imported before readings were available)
+node tatoebaAddReadings.js
+
 # Import an Anki .apkg deck into the wiki (one-time or repeated)
 node ankiimport.js file.apkg
 node ankiimport.js file.apkg --limit 50   # test with a small batch first

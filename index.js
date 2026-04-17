@@ -8,6 +8,7 @@ const fs = require('fs');
 const { marked } = require('marked');
 const database = require('./db');
 const wiki = require('./wiki');
+const tatoeba = require('./tatoeba');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
@@ -201,6 +202,18 @@ app.get('/api/random', (req, res) => {
 
   const n = parseInt(req.query.n || 5, 10);
   res.json({ results: database.randomEntries(n) });
+});
+
+// ─────────────────────────────────────────────
+// Tatoeba
+// ─────────────────────────────────────────────
+
+app.get('/api/tatoeba/search', (req, res) => {
+  const { q, page = 1, limit = 20 } = req.query;
+  if (!q) return res.status(400).json({ error: 'q is required' });
+  const limitInt = Math.min(parseInt(limit, 10) || 20, 100);
+  const pageInt  = Math.max(parseInt(page,  10) || 1,  1);
+  res.json(tatoeba.search(q, pageInt, limitInt));
 });
 
 // ─────────────────────────────────────────────

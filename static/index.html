@@ -296,6 +296,48 @@
   .kana-word-reading { font-size: 13px; color: var(--muted); }
   .kana-word-english { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
 
+  /* Tatoeba */
+  .tatoeba-btn {
+    display: block;
+    width: 100%;
+    margin: 16px 0 4px;
+    padding: 12px;
+    background: #c00;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+  }
+  .tatoeba-btn:hover { background: #a00; }
+  .tatoeba-panel { margin: 8px 0 16px; }
+  .tatoeba-sentence {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tatoeba-text { flex: 1; min-width: 0; }
+  .tatoeba-jp { font-size: 16px; margin-bottom: 2px; }
+  .tatoeba-jp ruby { ruby-align: center; }
+  .tatoeba-jp rt { font-size: 10px; color: var(--muted); }
+  .tatoeba-en { font-size: 13px; color: var(--muted); }
+  .tatoeba-use {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    font-size: 12px;
+    background: var(--tag-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .tatoeba-use:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .tatoeba-pager { display: flex; gap: 12px; align-items: center; justify-content: center; padding: 12px 0; font-size: 13px; color: var(--muted); }
+
   .podcast-group { border-bottom: 1px solid var(--border); }
   .podcast-group-header {
     display: flex;
@@ -689,7 +731,7 @@ function renderSearchResults(data, q, offset) {
     for (const [slug, has] of Object.entries(exists)) {
       if (!has) continue;
       const head = resultsDiv.querySelector(`[data-slug="${slug}"] .entry-head`);
-      if (head) head.insertAdjacentHTML('beforeend', '<span class="wiki-badge">wiki</span>');
+      if (head) head.insertAdjacentHTML('beforeend', `<a class="wiki-badge" href="/wiki/word/${slug}">wiki</a>`);
     }
   });
 
@@ -748,12 +790,15 @@ async function renderEntryPage(seq) {
       </div>
       ${renderSenses(entry.senses)}
       <div style="margin-top: 20px;">
-        <button class="primary" id="wiki-btn">${hasWiki ? '✎ Edit in Wiki' : '+ Add to Wiki'}</button>
+        <button class="primary" id="wiki-btn">${hasWiki ? 'View in Wiki' : '+ Add to Wiki'}</button>
       </div>
     </div>
   `;
 
-  document.getElementById('wiki-btn').addEventListener('click', () => addToWiki(entry));
+  document.getElementById('wiki-btn').addEventListener('click', () => {
+    if (hasWiki) { location.href = `/wiki/word/${slug}`; return; }
+    addToWiki(entry);
+  });
 }
 
 async function addToWiki(entry) {
@@ -920,6 +965,10 @@ async function renderWikiWordPage(slug) {
       saveBtn.classList.remove('save-dirty');
       statusEl.textContent = 'Saved';
       populateTagsDatalist();
+      // Refresh the rendered notes so view mode shows the updated content
+      fetch(`/api/wiki/word/${slug}`).then(r => r.ok ? r.json() : null).then(fresh => {
+        if (fresh) document.getElementById('wiki-notes-rendered').innerHTML = fresh.notesHtml || '';
+      }).catch(() => {});
     } catch {
       statusEl.textContent = 'Save failed';
     } finally {
@@ -934,6 +983,97 @@ async function renderWikiWordPage(slug) {
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
 
   document.getElementById('wiki-form').addEventListener('submit', e => { e.preventDefault(); save(); });
+
+  // ── Tatoeba ────────────────────────────────────────────────────────────────
+  // Search word to use: primary kanji form, or kana if no kanji
+  const tatoebaWord = entry
+    ? (entry.kanji[0]?.keb || entry.kana[0]?.reb)
+    : slug;
+
+  if (tatoebaWord) {
+    // Silently check if any sentences exist
+    fetch(`/api/tatoeba/search?q=${encodeURIComponent(tatoebaWord)}&page=1&limit=1`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || data.total === 0) return;
+        // Inject the button after the wiki form
+        const btn = document.createElement('button');
+        btn.className = 'tatoeba-btn';
+        btn.textContent = `Tatoeba  ${data.total.toLocaleString()} sentences`;
+        resultsDiv.appendChild(btn);
+
+        const panel = document.createElement('div');
+        panel.className = 'tatoeba-panel';
+        panel.hidden = true;
+        resultsDiv.appendChild(panel);
+
+        let currentPage = 1;
+        const PAGE_SIZE = 20;
+        const totalSentences = data.total;
+
+        async function loadPage(page) {
+          panel.innerHTML = '<div class="loading">Loading…</div>';
+          panel.hidden = false;
+          const r = await fetch(`/api/tatoeba/search?q=${encodeURIComponent(tatoebaWord)}&page=${page}&limit=${PAGE_SIZE}`);
+          const d = await r.json();
+          currentPage = page;
+          const totalPages = Math.ceil(totalSentences / PAGE_SIZE);
+
+          const rows = d.results.map(s => {
+            const en = s.translations.join(' / ');
+            const jpHtml = s.reading ? tatoebaToRuby(s.reading) : escHtml(s.japanese);
+            return `
+              <div class="tatoeba-sentence">
+                <div class="tatoeba-text">
+                  <div class="tatoeba-jp">${jpHtml}</div>
+                  <div class="tatoeba-en">${escHtml(en)}</div>
+                </div>
+                <button class="tatoeba-use" data-jp="${escHtml(s.japanese)}" data-en="${escHtml(en)}" data-reading="${escHtml(s.reading || '')}">Use</button>
+              </div>`;
+          }).join('');
+
+          const pager = totalPages > 1 ? `
+            <div class="tatoeba-pager">
+              <button ${page <= 1 ? 'disabled' : ''} id="tat-prev">← Prev</button>
+              <span>Page ${page} / ${totalPages}</span>
+              <button ${page >= totalPages ? 'disabled' : ''} id="tat-next">Next →</button>
+            </div>` : '';
+
+          panel.innerHTML = rows + pager;
+
+          panel.querySelectorAll('.tatoeba-use').forEach(useBtn => {
+            useBtn.addEventListener('click', () => {
+              const jp = useBtn.dataset.jp;
+              const en = useBtn.dataset.en;
+              const reading = useBtn.dataset.reading;
+              const jpRendered = reading ? tatoebaToRuby(reading) : escHtml(jp);
+              const notesEl = document.getElementById('wiki-notes');
+              const current = notesEl.value.trimEnd();
+              const hasSection = /^# Tatoeba$/m.test(current);
+              const insertion = hasSection
+                ? `\n- ${jpRendered}（${en}）`
+                : `\n\n# Tatoeba\n- ${jpRendered}（${en}）`;
+              notesEl.value = current + insertion;
+              // Switch to edit mode so the user sees what happened
+              setEditMode(true);
+              markDirty();
+              notesEl.scrollTop = notesEl.scrollHeight;
+            });
+          });
+
+          if (totalPages > 1) {
+            document.getElementById('tat-prev')?.addEventListener('click', () => loadPage(page - 1));
+            document.getElementById('tat-next')?.addEventListener('click', () => loadPage(page + 1));
+          }
+        }
+
+        btn.addEventListener('click', () => {
+          if (!panel.hidden) { panel.hidden = true; return; }
+          loadPage(currentPage);
+        });
+      })
+      .catch(() => {});  // tatoeba db not present — silently skip
+  }
 }
 
 // ─── Wiki tag page ─────────────────────────────────────────────────────────────
@@ -1192,6 +1332,31 @@ function setMeta(html) {
 
 function escHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Convert Tatoeba furigana markup to HTML ruby.
+// Format: [kanji|part1|part2…] where parts joined = reading.
+// Plain text outside brackets is HTML-escaped and passed through as-is.
+function tatoebaToRuby(str) {
+  if (!str) return '';
+  let out = '';
+  let i = 0;
+  while (i < str.length) {
+    if (str[i] === '[') {
+      const end = str.indexOf(']', i);
+      if (end === -1) { out += escHtml(str[i++]); continue; }
+      const parts = str.slice(i + 1, end).split('|');
+      if (parts.length >= 2) {
+        out += `<ruby>${escHtml(parts[0])}<rt>${escHtml(parts.slice(1).join(''))}</rt></ruby>`;
+      } else {
+        out += escHtml(parts[0]);
+      }
+      i = end + 1;
+    } else {
+      out += escHtml(str[i++]);
+    }
+  }
+  return out;
 }
 
 // ─── Kanji drill-down ─────────────────────────────────────────────────────────
