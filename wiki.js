@@ -239,7 +239,83 @@ function getWikiBrowseData() {
 
   const stats = { wordCount: allWords.length, podcastCount: podcasts.length, earliest, latest };
 
-  return { words: allWords, tags, podcasts, stats };
+  const recentUpdated = db.prepare(
+    'SELECT slug, updated_at, created_at FROM wiki_words ORDER BY updated_at DESC LIMIT 50'
+  ).all();
+  const recentCreated = db.prepare(
+    'SELECT slug, updated_at, created_at FROM wiki_words ORDER BY created_at DESC LIMIT 50'
+  ).all();
+
+  return { words: allWords, tags, podcasts, stats, recentUpdated, recentCreated };
+}
+
+// ─────────────────────────────────────────────
+// Wiki search
+// ─────────────────────────────────────────────
+
+function searchWiki(q, jdictDb) {
+  const db = getWikiDb();
+  q = q.trim();
+  if (!q) return [];
+
+  const resultMap = new Map(); // slug → result
+
+  // 1. Direct slug matches
+  for (const r of db.prepare(
+    'SELECT slug, seq FROM wiki_words WHERE slug LIKE ? ORDER BY slug LIMIT 50'
+  ).all(`%${q}%`)) {
+    resultMap.set(r.slug, { slug: r.slug, seq: r.seq });
+  }
+
+  // 2. Reading/kanji matches — find wiki words whose jdict entry matches q
+  if (jdictDb) {
+    const allWords = db.prepare('SELECT slug, seq FROM wiki_words WHERE seq IS NOT NULL').all();
+    if (allWords.length > 0) {
+      const seqToSlug = {};
+      for (const w of allWords) seqToSlug[w.seq] = w.slug;
+      const seqs = allWords.map(w => w.seq);
+      const placeholders = seqs.map(() => '?').join(',');
+      const pat = `% ${q}%`;
+      const matches = jdictDb.prepare(`
+        SELECT e.seq FROM entries e
+        JOIN entries_text t ON t.seq = e.seq
+        WHERE e.seq IN (${placeholders})
+          AND ((' ' || t.kanji || ' ' LIKE ?) OR (' ' || t.kana || ' ' LIKE ?))
+        LIMIT 50
+      `).all(...seqs, pat, pat);
+      for (const m of matches) {
+        const slug = seqToSlug[m.seq];
+        if (slug && !resultMap.has(slug)) resultMap.set(slug, { slug, seq: m.seq });
+      }
+    }
+  }
+
+  const results = [...resultMap.values()];
+
+  // Enrich with reading + first English gloss
+  if (jdictDb && results.length > 0) {
+    const seqs = results.filter(r => r.seq).map(r => r.seq);
+    if (seqs.length > 0) {
+      const placeholders = seqs.map(() => '?').join(',');
+      const entryMap = {};
+      for (const e of jdictDb.prepare(
+        `SELECT seq, kana_json, senses_json FROM entries WHERE seq IN (${placeholders})`
+      ).all(...seqs)) {
+        const kana   = JSON.parse(e.kana_json);
+        const senses = JSON.parse(e.senses_json);
+        const gloss  = senses[0]?.glosses?.find(g => g.lang === 'eng')?.text || '';
+        entryMap[e.seq] = { reading: kana[0]?.reb || '', gloss };
+      }
+      for (const r of results) {
+        if (r.seq && entryMap[r.seq]) {
+          r.reading = entryMap[r.seq].reading;
+          r.gloss   = entryMap[r.seq].gloss;
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 // ─────────────────────────────────────────────
@@ -315,6 +391,7 @@ function getKanaWords(jdictDb, char) {
 }
 
 module.exports = {
+  searchWiki,
   slugify,
   getWordPage,
   wordExists,

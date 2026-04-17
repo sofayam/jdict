@@ -220,6 +220,13 @@ app.get('/api/tatoeba/search', (req, res) => {
 // Wiki
 // ─────────────────────────────────────────────
 
+app.get('/api/wiki/search', (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: 'q is required' });
+  const results = wiki.searchWiki(q, database.getDb());
+  res.json({ query: q, results });
+});
+
 app.get('/api/wiki/browse', async (req, res) => {
   try {
     const data = await wiki.getWikiBrowseData();
@@ -375,6 +382,10 @@ app.get('/wiki/kana', (req, res) => {
 });
 
 app.get('/wiki/kana/:char', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/search/:word', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 
