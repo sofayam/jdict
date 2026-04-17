@@ -7,6 +7,14 @@
   "background_color": "#ffffff",
   "theme_color": "#0033bb",
   "lang": "ja",
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [{ "name": "image", "accept": ["image/png", "image/jpeg", "image/gif", "image/webp"] }]
+    }
+  },
   "icons": [
     { "src": "/icon-72.png",  "sizes": "72x72",   "type": "image/png" },
     { "src": "/icon-96.png",  "sizes": "96x96",   "type": "image/png" },

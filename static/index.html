@@ -363,6 +363,12 @@
   .kana-word-reading { font-size: 13px; color: var(--muted); }
   .kana-word-english { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
 
+  /* Image action buttons (Find / Paste) */
+  .image-actions { display: flex; gap: 8px; margin: -8px 0 14px; flex-wrap: wrap; }
+  .wiki-form.view-mode .image-actions { display: none; }
+  .img-action-btn { font-size: 12px; padding: 5px 10px; color: var(--muted); }
+  .img-action-btn:hover { color: var(--text); }
+
   /* Tatoeba */
   .tatoeba-btn {
     display: inline-block;
@@ -741,7 +747,7 @@ function makeDropZone(zone, initialFilename, onChange) {
   });
 
   initialFilename ? showImage(initialFilename) : showEmpty();
-  return { getFilename: () => current };
+  return { getFilename: () => current, setImage: showImage };
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -979,6 +985,10 @@ async function renderWikiWordPage(slug) {
         <label>Image</label>
         <div class="drop-zone" id="drop-zone"></div>
       </div>
+      <div class="image-actions">
+        <button type="button" class="img-action-btn" id="find-image-btn">Find on Google Images…</button>
+        <button type="button" class="img-action-btn" id="paste-image-btn" hidden>Paste from clipboard</button>
+      </div>
 
       <div class="form-row">
         <button type="submit" class="primary" id="save-btn" hidden>Save</button>
@@ -1046,8 +1056,48 @@ async function renderWikiWordPage(slug) {
   const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '', markDirty);
 
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
-
   document.getElementById('wiki-form').addEventListener('submit', e => { e.preventDefault(); save(); });
+
+  // ── Image actions ──────────────────────────────────────────────────────────
+  document.getElementById('find-image-btn').addEventListener('click', () => {
+    sessionStorage.setItem('sharedImageTarget', slug);
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(displayName)}&tbm=isch`, '_blank');
+  });
+
+  const pasteBtn = document.getElementById('paste-image-btn');
+  if (navigator.clipboard?.read) {
+    pasteBtn.hidden = false;
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find(t => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const ext  = imageType.split('/')[1] || 'png';
+            const fd   = new FormData();
+            fd.append('image', new File([blob], `paste.${ext}`, { type: imageType }));
+            const res  = await fetch('/api/wiki/image-upload', { method: 'POST', body: fd });
+            const { filename } = await res.json();
+            dropZone.setImage(filename);
+            setEditMode(true);
+            markDirty();
+            return;
+          }
+        }
+        alert('No image found in clipboard');
+      } catch { alert('Clipboard access was denied'); }
+    });
+  }
+
+  // ── Pending shared image (from Web Share Target) ───────────────────────────
+  const pendingImage = sessionStorage.getItem('pendingImage');
+  if (pendingImage) {
+    sessionStorage.removeItem('pendingImage');
+    dropZone.setImage(pendingImage);
+    markDirty();
+    save();
+  }
 
   // ── Tatoeba ────────────────────────────────────────────────────────────────
   // Search word to use: primary kanji form, or kana if no kanji
@@ -1717,6 +1767,20 @@ async function router() {
 
 populateTagsDatalist();
 fetch('/api/config').then(r => r.json()).then(cfg => { window._jdictConfig = cfg; });
+
+// Handle image shared via Web Share Target
+// Server saves the image and redirects to /?sharedImage=FILENAME
+const _sharedImage = new URLSearchParams(location.search).get('sharedImage');
+if (_sharedImage) {
+  sessionStorage.setItem('pendingImage', _sharedImage);
+  history.replaceState({}, '', location.pathname);
+  const targetSlug = sessionStorage.getItem('sharedImageTarget');
+  if (targetSlug) {
+    sessionStorage.removeItem('sharedImageTarget');
+    history.replaceState({}, '', `/wiki/word/${encodeURIComponent(targetSlug)}`);
+  }
+}
+
 router();
 
 if ('serviceWorker' in navigator) {

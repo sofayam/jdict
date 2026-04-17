@@ -358,6 +358,15 @@ app.post('/api/wiki/image-upload', upload.single('image'), (req, res) => {
   res.json({ filename: req.file.filename });
 });
 
+// Web Share Target — receives shared images from the iOS share sheet
+app.post('/share', upload.single('image'), (req, res) => {
+  if (!req.file) return res.redirect('/?shareError=1');
+  res.redirect(`/?sharedImage=${encodeURIComponent(req.file.filename)}`);
+});
+app.get('/share', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
 app.get('/entry/:seq', (req, res) => {
   // Client-side router will handle rendering the entry.
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
