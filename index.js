@@ -5,6 +5,8 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
+const http = require('http');
 const { marked } = require('marked');
 const database = require('./db');
 const wiki = require('./wiki');
@@ -372,6 +374,58 @@ app.post('/api/wiki/image-upload', upload.single('image'), (req, res) => {
     return res.status(400).json({ error: 'No file uploaded' });
   }
   res.json({ filename: req.file.filename });
+});
+
+app.post('/api/wiki/image-from-url', express.json(), (req, res) => {
+  let { url } = req.body || {};
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: 'A valid http/https URL is required' });
+  }
+
+  // Google Images "Copy Link" gives google.com/imgres?imgurl=ACTUAL_URL&...
+  // Extract the real image URL from the imgurl query parameter.
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('google.') && parsed.pathname === '/imgres') {
+      const imgurl = parsed.searchParams.get('imgurl');
+      if (imgurl) url = imgurl;
+    }
+  } catch {}
+
+  const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+
+  function fetchUrl(urlStr, redirects = 0) {
+    if (redirects > 8) return res.status(400).json({ error: 'Too many redirects' });
+    const mod = urlStr.startsWith('https') ? https : http;
+    const request = mod.get(urlStr, { timeout: 15000, headers: HEADERS }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const next = new URL(response.headers.location, urlStr).href;
+        response.resume();
+        return fetchUrl(next, redirects + 1);
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        return res.status(400).json({ error: `Remote server returned ${response.statusCode}` });
+      }
+      const contentType = response.headers['content-type'] || '';
+      const extMap = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif' };
+      const ext = extMap[contentType.split(';')[0].trim()] || 'jpg';
+      const filename = `${uuidv4()}.${ext}`;
+      const dest = path.join(__dirname, 'wiki', 'images', filename);
+      const out = fs.createWriteStream(dest);
+      response.pipe(out);
+      out.on('finish', () => res.json({ filename }));
+      out.on('error', err => { fs.unlink(dest, () => {}); res.status(500).json({ error: err.message }); });
+    });
+    request.on('error', err => res.status(500).json({ error: err.message }));
+    request.on('timeout', () => { request.destroy(); res.status(400).json({ error: 'Request timed out' }); });
+  }
+
+  fetchUrl(url);
 });
 
 // Web Share Target — receives shared images from the iOS share sheet

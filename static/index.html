@@ -378,6 +378,7 @@
   .wiki-form.view-mode .image-actions { display: none; }
   .img-action-btn { font-size: 12px; padding: 5px 10px; color: var(--muted); }
   .img-action-btn:hover { color: var(--text); }
+  #url-image-row:not([hidden]) { display: flex; }
 
   /* Tatoeba */
   .tatoeba-btn {
@@ -998,6 +999,11 @@ async function renderWikiWordPage(slug) {
       <div class="image-actions">
         <button type="button" class="img-action-btn" id="find-image-btn">Find on Google Images…</button>
         <button type="button" class="img-action-btn" id="paste-image-btn" hidden>Paste from clipboard</button>
+        <button type="button" class="img-action-btn" id="url-image-btn">Import from URL…</button>
+      </div>
+      <div id="url-image-row" hidden style="gap:6px;margin-top:6px">
+        <input type="url" id="url-image-input" placeholder="Paste image URL…" style="flex:1;font-size:14px;padding:4px 6px;border:1px solid var(--border);border-radius:4px">
+        <button type="button" class="img-action-btn" id="url-image-go">Import</button>
       </div>
 
       <div class="form-row">
@@ -1099,6 +1105,46 @@ async function renderWikiWordPage(slug) {
       } catch { alert('Clipboard access was denied'); }
     });
   }
+
+  // ── Import from URL ────────────────────────────────────────────────────────
+  document.getElementById('url-image-btn').addEventListener('click', () => {
+    const row = document.getElementById('url-image-row');
+    row.hidden = !row.hidden;
+    if (!row.hidden) document.getElementById('url-image-input').focus();
+  });
+
+  async function importFromUrl() {
+    const input = document.getElementById('url-image-input');
+    const url = input.value.trim();
+    if (!url) return;
+    const goBtn = document.getElementById('url-image-go');
+    goBtn.disabled = true;
+    goBtn.textContent = 'Importing…';
+    try {
+      const res = await fetch('/api/wiki/image-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      dropZone.setImage(data.filename);
+      setEditMode(true);
+      markDirty();
+      input.value = '';
+      document.getElementById('url-image-row').hidden = true;
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Import';
+    }
+  }
+
+  document.getElementById('url-image-go').addEventListener('click', importFromUrl);
+  document.getElementById('url-image-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); importFromUrl(); }
+  });
 
   // ── Pending shared image (from Web Share Target) ───────────────────────────
   const pendingImage = sessionStorage.getItem('pendingImage');
