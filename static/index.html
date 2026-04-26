@@ -363,6 +363,16 @@
   .kana-word-reading { font-size: 13px; color: var(--muted); }
   .kana-word-english { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
 
+  .kanji-grid { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0 12px; }
+  .kanji-cell { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 4px; font-size: 17px; text-decoration: none; color: var(--text); background: var(--bg2, #f0f0f0); }
+  .kanji-cell-none { color: var(--muted); opacity: 0.3; cursor: default; }
+  .kanji-cell-notes { background: #d4edda; color: #155724; }
+  .kanji-cell-headword { background: #cce5ff; color: #004085; }
+  .kanji-cell:not(.kanji-cell-none):hover { filter: brightness(0.88); }
+  .kanji-detail-info { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 4px; }
+  .kanji-detail-label { font-weight: 600; color: var(--text); margin-right: 4px; }
+  .kanji-detail-meanings { color: var(--text); font-size: 15px; }
+
   /* Image action buttons (Find / Paste) */
   .image-actions { display: flex; gap: 8px; margin: -8px 0 14px; flex-wrap: wrap; }
   .wiki-form.view-mode .image-actions { display: none; }
@@ -1375,6 +1385,7 @@ async function renderWikiIndexPage() {
       <button class="wiki-tab" data-tab="recent">Recent</button>
       <button class="wiki-tab" data-tab="tags">Tags</button>
       <button class="wiki-tab" data-tab="podcasts">Podcasts</button>
+      <button class="wiki-tab" data-tab="kanjis">Kanjis</button>
     </div>
 
     <div class="wiki-tab-panel" id="tab-index">
@@ -1396,15 +1407,31 @@ async function renderWikiIndexPage() {
       <input type="search" id="wiki-filter" placeholder="Filter words…" autocomplete="off" style="margin-bottom:10px">
       <div id="podcast-list">${renderPodcasts('')}</div>
     </div>
+
+    <div class="wiki-tab-panel" id="tab-kanjis">
+      <div id="kanji-grid-container"><div class="loading">Loading…</div></div>
+    </div>
   `;
 
   // Tab switching — honour location.hash on load, default to index
-  const TABS = ['index', 'recent', 'tags', 'podcasts'];
+  const TABS = ['index', 'recent', 'tags', 'podcasts', 'kanjis'];
+  let kanjiGridLoaded = false;
   function activateTab(name) {
     if (!TABS.includes(name)) name = 'index';
     document.querySelectorAll('.wiki-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     document.querySelectorAll('.wiki-tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
     history.replaceState(null, '', `/wiki#${name}`);
+    if (name === 'kanjis' && !kanjiGridLoaded) {
+      kanjiGridLoaded = true;
+      fetch('/api/wiki/kanji-coverage').then(r => r.json()).then(rows => {
+        const cells = rows.map(r => {
+          if (r.status === 'none') return `<span class="kanji-cell kanji-cell-none">${escHtml(r.literal)}</span>`;
+          const cls = r.status === 'headword' ? 'kanji-cell kanji-cell-headword' : 'kanji-cell kanji-cell-notes';
+          return `<a href="/wiki/kanji/${encodeURIComponent(r.literal)}" class="${cls}">${escHtml(r.literal)}</a>`;
+        }).join('');
+        document.getElementById('kanji-grid-container').innerHTML = `<div class="kanji-grid">${cells}</div>`;
+      });
+    }
   }
   document.querySelectorAll('.wiki-tab').forEach(b => {
     b.addEventListener('click', () => activateTab(b.dataset.tab));
@@ -1483,6 +1510,44 @@ async function renderKanaPage(char) {
   }
 
   resultsDiv.innerHTML = html;
+}
+
+async function renderKanjiDetailPage(char) {
+  setMeta(`<a href="/wiki#kanjis">← Kanjis</a>`);
+  paginationDiv.innerHTML = '';
+  resultsDiv.innerHTML = '<div class="loading">Loading…</div>';
+
+  const data = await fetch(`/api/wiki/kanji/${encodeURIComponent(char)}`).then(r => r.json());
+  const k = data.kanji;
+
+  let infoHtml = '';
+  if (k) {
+    const on  = k.on_json  ? JSON.parse(k.on_json).join('、')  : '';
+    const kun = k.kun_json ? JSON.parse(k.kun_json).join('、') : '';
+    const meanings = k.meanings_json ? JSON.parse(k.meanings_json).join(', ') : '';
+    infoHtml = `<div class="kanji-detail-info">
+      ${on  ? `<div><span class="kanji-detail-label">On</span> ${escHtml(on)}</div>`  : ''}
+      ${kun ? `<div><span class="kanji-detail-label">Kun</span> ${escHtml(kun)}</div>` : ''}
+      ${meanings ? `<div class="kanji-detail-meanings">${escHtml(meanings)}</div>` : ''}
+      ${k.grade ? `<div><span class="kanji-detail-label">Grade</span> ${k.grade}</div>` : ''}
+      ${k.freq  ? `<div><span class="kanji-detail-label">Freq</span> #${k.freq}</div>` : ''}
+    </div>`;
+  }
+
+  function wordList(slugs) {
+    if (!slugs.length) return '<p class="wiki-none">None</p>';
+    return `<ul class="recent-list">${slugs.map(s =>
+      `<li><a href="/wiki/word/${encodeURIComponent(s)}">${escHtml(s)}</a></li>`
+    ).join('')}</ul>`;
+  }
+
+  resultsDiv.innerHTML = `
+    <div style="font-size:40px;font-weight:bold;margin:8px 0 4px">${escHtml(char)}</div>
+    ${infoHtml}
+    ${data.headwordPages.length ? `<div class="section-label" style="margin-top:16px">In headwords (${data.headwordPages.length})</div>${wordList(data.headwordPages)}` : ''}
+    ${data.notesPages.length   ? `<div class="section-label" style="margin-top:16px">In notes only (${data.notesPages.length})</div>${wordList(data.notesPages)}`   : ''}
+    ${!data.headwordPages.length && !data.notesPages.length ? '<p class="wiki-none" style="margin-top:16px">No wiki pages contain this kanji</p>' : ''}
+  `;
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
@@ -1739,6 +1804,9 @@ async function router() {
 
   } else if (parts[0] === 'wiki' && parts[1] === 'kana' && parts[2]) {
     await renderKanaPage(decodeURIComponent(parts[2]));
+
+  } else if (parts[0] === 'wiki' && parts[1] === 'kanji' && parts[2]) {
+    await renderKanjiDetailPage(decodeURIComponent(parts[2]));
 
   } else if (parts[0] === 'wiki' && parts[1] === 'kana') {
     history.replaceState({}, '', '/wiki');

@@ -278,6 +278,22 @@ app.get('/api/wiki/kana/:char', async (req, res) => {
   }
 });
 
+app.get('/api/wiki/kanji-coverage', (req, res) => {
+  try {
+    res.json(wiki.getKanjiCoverage(database.getDb()));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/wiki/kanji/:char', (req, res) => {
+  const char = req.params.char;
+  if (!char || [...char].length !== 1) return res.status(400).json({ error: 'Single character required' });
+  const kanjiData = database.getKanji(char);
+  const pages = wiki.getKanjiPages(char);
+  res.json({ kanji: kanjiData || null, ...pages });
+});
+
 app.get('/api/wiki/tags', async (req, res) => {
   try {
     const tags = await wiki.getAllTags();
@@ -391,6 +407,10 @@ app.get('/wiki/kana', (req, res) => {
 });
 
 app.get('/wiki/kana/:char', (req, res) => {
+  res.sendFile(path.join(__dirname, 'static', 'index.html'));
+});
+
+app.get('/wiki/kanji/:char', (req, res) => {
   res.sendFile(path.join(__dirname, 'static', 'index.html'));
 });
 

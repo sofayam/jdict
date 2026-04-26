@@ -390,6 +390,40 @@ function getKanaWords(jdictDb, char) {
   return { char: hira, words, cards };
 }
 
+// Returns [ { literal, status } ] for the top 2500 kanji by freq rank.
+// status: 'headword' | 'notes' | 'none'
+function getKanjiCoverage(jdictDb) {
+  const db = getWikiDb();
+
+  const slugChars = new Set();
+  const notesChars = new Set();
+  for (const row of db.prepare('SELECT slug, notes FROM wiki_words').all()) {
+    for (const ch of row.slug) slugChars.add(ch);
+    if (row.notes) for (const ch of row.notes) notesChars.add(ch);
+  }
+
+  const rows = jdictDb.prepare(
+    'SELECT literal FROM kanji WHERE freq IS NOT NULL ORDER BY freq LIMIT 2500'
+  ).all();
+
+  return rows.map(r => ({
+    literal: r.literal,
+    status: slugChars.has(r.literal) ? 'headword' : notesChars.has(r.literal) ? 'notes' : 'none',
+  }));
+}
+
+// Returns wiki pages where `char` appears, plus basic kanji data.
+function getKanjiPages(char) {
+  const db = getWikiDb();
+  const inSlug  = db.prepare("SELECT slug FROM wiki_words WHERE slug  LIKE ? ORDER BY slug").all(`%${char}%`);
+  const inNotes = db.prepare("SELECT slug FROM wiki_words WHERE notes LIKE ? AND slug NOT LIKE ? ORDER BY slug")
+                    .all(`%${char}%`, `%${char}%`);
+  return {
+    headwordPages: inSlug.map(r => r.slug),
+    notesPages:    inNotes.map(r => r.slug),
+  };
+}
+
 module.exports = {
   searchWiki,
   slugify,
@@ -405,4 +439,6 @@ module.exports = {
   getCardPage,
   getKanaIndex,
   getKanaWords,
+  getKanjiCoverage,
+  getKanjiPages,
 };
