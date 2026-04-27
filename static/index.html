@@ -80,6 +80,7 @@
   .wiki-result-slug { font-size: 20px; font-weight: bold; }
   .wiki-result-reading { font-size: 13px; color: var(--muted); }
   .wiki-result-gloss { font-size: 13px; color: var(--muted); margin-left: auto; text-align: right; }
+  .wiki-result-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; background: var(--muted); border-radius: 3px; padding: 1px 4px; vertical-align: middle; margin-left: 4px; }
 
   main { padding: 0 10px 60px; }
   #meta {
@@ -134,6 +135,7 @@
   }
   button:disabled { opacity: 0.4; cursor: default; }
   button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  button.secondary { background: var(--bg); color: var(--text); border-color: var(--border); }
 
   .loading { text-align: center; padding: 40px; color: var(--muted); }
   .msg { text-align: center; padding: 40px; color: var(--muted); }
@@ -206,6 +208,18 @@
   .wiki-form.view-mode #wiki-notes-rendered { display: block; }
   #wiki-notes-rendered { display: none; }
   .wiki-form.view-mode #wiki-notes-rendered:empty { display: none; }
+
+  .wiki-form.view-mode #card-notes { display: none; }
+  .wiki-form.view-mode #card-notes-rendered { display: block; }
+  #card-notes-rendered { display: none; }
+  .wiki-form.view-mode #card-notes-rendered:empty { display: none; }
+  .wiki-form.view-mode #card-english,
+  .wiki-form.view-mode #card-japanese,
+  .wiki-form.view-mode #card-reading,
+  .wiki-form.view-mode label[for="card-english"],
+  .wiki-form.view-mode label[for="card-japanese"],
+  .wiki-form.view-mode label[for="card-reading"],
+  .wiki-form.view-mode #delete-btn { display: none; }
   .wiki-notes-rendered { line-height: 1.6; }
   .wiki-notes-rendered h1 { margin: 0.5em 0 0.25em; font-size: 1.4em; font-weight: bold; }
   .wiki-notes-rendered h2 { margin: 0.5em 0 0.25em; font-size: 1.2em; font-weight: bold; }
@@ -858,18 +872,7 @@ async function renderEntryPage(seq) {
   const wikiRes = await fetch(`/api/wiki/word/${slug}`);
   const hasWiki = wikiRes.ok;
 
-  // If this lookup came from a podcast, silently append a context to the existing wiki page
-  if (hasWiki && podcastName) {
-    const existing = await wikiRes.json();
-    const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString(),
-                  podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs };
-    existing.contexts = [...(existing.contexts || []), ctx];
-    fetch(`/api/wiki/word/${slug}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(existing),
-    });
-  }
+  const wikiData = hasWiki ? await wikiRes.json() : null;
 
   resultsDiv.innerHTML = `
     <div class="entry-detail">
@@ -878,16 +881,35 @@ async function renderEntryPage(seq) {
         ${entry.kanji.length ? `<span class="kana">${entry.kana.map(k => k.reb).join('、')}</span>` : ''}
       </div>
       ${renderSenses(entry.senses)}
-      <div style="margin-top: 20px;">
-        <button class="primary" id="wiki-btn">${hasWiki ? 'View in Wiki' : '+ Add to Wiki'}</button>
+      <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap">
+        ${hasWiki
+          ? `<button class="primary" id="wiki-btn">Add Link to Wiki</button>
+             <button class="secondary" id="wiki-view-btn">View Only</button>`
+          : `<button class="primary" id="wiki-btn">+ Add to Wiki</button>`}
       </div>
     </div>
   `;
 
-  document.getElementById('wiki-btn').addEventListener('click', () => {
-    if (hasWiki) { location.href = `/wiki/word/${slug}`; return; }
-    addToWiki(entry);
-  });
+  if (hasWiki) {
+    document.getElementById('wiki-btn').addEventListener('click', () => {
+      if (podcastName) {
+        const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString(),
+                      podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs };
+        const updated = { ...wikiData, contexts: [...(wikiData.contexts || []), ctx] };
+        fetch(`/api/wiki/word/${slug}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated),
+        });
+      }
+      location.href = `/wiki/word/${slug}`;
+    });
+    document.getElementById('wiki-view-btn').addEventListener('click', () => {
+      location.href = `/wiki/word/${slug}`;
+    });
+  } else {
+    document.getElementById('wiki-btn').addEventListener('click', () => addToWiki(entry));
+  }
 }
 
 async function addToWiki(entry) {
@@ -1430,7 +1452,7 @@ async function renderWikiIndexPage() {
   }
 
   resultsDiv.innerHTML = `
-    <div style="font-size:22px;font-weight:bold;margin:12px 0 4px">Wiki</div>
+    <div style="font-size:22px;font-weight:bold;margin:12px 0 4px">Wiki &nbsp;<a href="/wiki/card/new" style="font-size:13px;font-weight:normal;vertical-align:middle">+ New Card</a></div>
     <div class="wiki-stats">${wordCount} words · ${podcastCount} podcasts${dateRange ? ` · ${dateRange}` : ''}</div>
 
     <div class="wiki-tabs">
@@ -1438,6 +1460,7 @@ async function renderWikiIndexPage() {
       <button class="wiki-tab" data-tab="recent">Recent</button>
       <button class="wiki-tab" data-tab="tags">Tags</button>
       <button class="wiki-tab" data-tab="podcasts">Podcasts</button>
+      <button class="wiki-tab" data-tab="cards">Cards (${data.cards.length})</button>
       <button class="wiki-tab" data-tab="kanjis">Kanjis</button>
     </div>
 
@@ -1461,13 +1484,22 @@ async function renderWikiIndexPage() {
       <div id="podcast-list">${renderPodcasts('')}</div>
     </div>
 
+    <div class="wiki-tab-panel" id="tab-cards">
+      ${data.cards.length ? `<ul class="recent-list">${data.cards.map(c => `
+        <li>
+          <a href="/wiki/card/${encodeURIComponent(c.slug)}">${escHtml(c.slug)}</a>
+          ${c.english ? `<span class="recent-date" style="color:var(--muted);font-style:italic">${escHtml(c.english)}</span>` : ''}
+        </li>`).join('')}</ul>`
+      : '<p class="wiki-none">No cards yet — <a href="/wiki/card/new">create one</a></p>'}
+    </div>
+
     <div class="wiki-tab-panel" id="tab-kanjis">
       <div id="kanji-grid-container"><div class="loading">Loading…</div></div>
     </div>
   `;
 
   // Tab switching — honour location.hash on load, default to index
-  const TABS = ['index', 'recent', 'tags', 'podcasts', 'kanjis'];
+  const TABS = ['index', 'recent', 'tags', 'podcasts', 'cards', 'kanjis'];
   let kanjiGridLoaded = false;
   function activateTab(name) {
     if (!TABS.includes(name)) name = 'index';
@@ -1502,6 +1534,65 @@ async function renderWikiIndexPage() {
   });
 }
 
+async function renderNewCardPage() {
+  setMeta(`<a href="/wiki">← Wiki</a>`);
+  paginationDiv.innerHTML = '';
+  document.title = 'New Card — jdict';
+
+  resultsDiv.innerHTML = `
+    <div style="font-size:20px;font-weight:bold;margin:12px 0 16px">New Card</div>
+    <form id="new-card-form" class="wiki-form" style="display:block">
+      <label for="nc-slug">Title</label>
+      <input type="text" id="nc-slug" required autocomplete="off" style="font-size:16px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box">
+
+      <label for="nc-english" style="margin-top:10px">English</label>
+      <input type="text" id="nc-english" autocomplete="off" style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box">
+
+      <label for="nc-japanese" style="margin-top:10px">Japanese</label>
+      <input type="text" id="nc-japanese" autocomplete="off" style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box">
+
+      <label for="nc-reading" style="margin-top:10px">Reading</label>
+      <input type="text" id="nc-reading" autocomplete="off" style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box">
+
+      <label for="nc-notes" style="margin-top:10px">Notes</label>
+      <textarea id="nc-notes" rows="6"></textarea>
+
+      <div class="form-row" style="margin-top:12px">
+        <button type="submit" class="primary">Create</button>
+        <span id="nc-status" class="save-status"></span>
+      </div>
+    </form>
+  `;
+
+  document.getElementById('new-card-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const slug    = document.getElementById('nc-slug').value.trim();
+    const english = document.getElementById('nc-english').value.trim();
+    const japanese = document.getElementById('nc-japanese').value.trim();
+    const reading  = document.getElementById('nc-reading').value.trim();
+    const notes    = document.getElementById('nc-notes').value;
+    const status   = document.getElementById('nc-status');
+
+    if (!slug) return;
+    status.textContent = 'Creating…';
+    try {
+      const res = await fetch('/api/wiki/card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, english, japanese, reading, notes }),
+      });
+      if (res.status === 409) { status.textContent = 'A card with that title already exists'; return; }
+      if (!res.ok) { status.textContent = 'Failed'; return; }
+      history.pushState({}, '', `/wiki/card/${encodeURIComponent(slug)}`);
+      await renderWikiCardPage(slug);
+    } catch {
+      status.textContent = 'Failed';
+    }
+  });
+
+  document.getElementById('nc-slug').focus();
+}
+
 async function renderWikiCardPage(slug) {
   setMeta(`<a href="javascript:history.back()">← Back</a> &nbsp;·&nbsp; <a href="/wiki">Wiki</a>`);
   paginationDiv.innerHTML = '';
@@ -1513,14 +1604,6 @@ async function renderWikiCardPage(slug) {
 
   document.title = `${card.japanese || slug} — jdict`;
 
-  const imageHtml = card.image
-    ? `<div style="margin:8px 0"><img src="/wiki/images/${escHtml(card.image)}" alt="" style="max-width:100%;border-radius:4px"></div>`
-    : '';
-
-  const notesHtml = card.notesHtml?.trim()
-    ? `<div class="wiki-notes-rendered">${card.notesHtml}</div>`
-    : '';
-
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
@@ -1529,9 +1612,149 @@ async function renderWikiCardPage(slug) {
       </div>
       <div class="senses"><div class="sense-row"><span class="gloss">${escHtml(card.english || '')}</span></div></div>
     </div>
-    ${imageHtml}
-    ${notesHtml}
+
+    <div class="section-label section-label-row">Notes <button type="button" class="quill-btn" id="edit-toggle" title="Edit">🖊️</button></div>
+    <form class="wiki-form view-mode" id="card-form">
+      <label for="card-english" style="margin-top:4px">English</label>
+      <input type="text" id="card-english" value="${escAttr(card.english || '')}" readonly style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box;background:var(--bg)">
+
+      <label for="card-japanese" style="margin-top:10px">Japanese</label>
+      <input type="text" id="card-japanese" value="${escAttr(card.japanese || '')}" readonly style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box;background:var(--bg)">
+
+      <label for="card-reading" style="margin-top:10px">Reading</label>
+      <input type="text" id="card-reading" value="${escAttr(card.reading || '')}" readonly style="font-size:15px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;width:100%;box-sizing:border-box;background:var(--bg)">
+
+      <label for="card-notes" style="margin-top:10px">Notes</label>
+      <div id="card-notes-rendered" class="wiki-notes-rendered"></div>
+      <textarea id="card-notes" readonly></textarea>
+
+      <div class="image-section">
+        <label>Image</label>
+        <div class="drop-zone" id="drop-zone"></div>
+      </div>
+      <div class="image-actions">
+        <button type="button" class="img-action-btn" id="find-image-btn">Find on Google Images…</button>
+        <button type="button" class="img-action-btn" id="paste-image-btn" hidden>Paste from clipboard</button>
+        <button type="button" class="img-action-btn" id="url-image-btn">Import from URL…</button>
+      </div>
+      <div id="url-image-row" hidden style="gap:6px;margin-top:6px">
+        <input type="url" id="url-image-input" placeholder="Paste image URL…" style="flex:1;font-size:14px;padding:4px 6px;border:1px solid var(--border);border-radius:4px">
+        <button type="button" class="img-action-btn" id="url-image-go">Import</button>
+      </div>
+
+      <div class="form-row">
+        <button type="submit" class="primary" id="save-btn" hidden>Save</button>
+        <span class="save-status" id="save-status"></span>
+        <button type="button" id="delete-btn" class="img-action-btn" style="margin-left:auto;color:#c00;border-color:#c00">Delete</button>
+      </div>
+    </form>
   `;
+
+  document.getElementById('card-notes-rendered').innerHTML = card.notesHtml || '';
+  document.getElementById('card-notes').value = card.notes || '';
+
+  const statusEl  = document.getElementById('save-status');
+  const saveBtn   = document.getElementById('save-btn');
+  const cardForm  = document.getElementById('card-form');
+  const editToggle = document.getElementById('edit-toggle');
+  let isDirty = false;
+
+  function setEditMode(on) {
+    cardForm.classList.toggle('view-mode', !on);
+    editToggle.classList.toggle('active', on);
+    ['card-english', 'card-japanese', 'card-reading', 'card-notes'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.readOnly = !on;
+    });
+  }
+  editToggle.addEventListener('click', () => setEditMode(cardForm.classList.contains('view-mode')));
+
+  function markDirty() {
+    isDirty = true;
+    saveBtn.hidden = false;
+    saveBtn.classList.add('save-dirty');
+  }
+
+  async function save() {
+    saveBtn.disabled = true;
+    statusEl.textContent = 'Saving…';
+    try {
+      await fetch(`/api/wiki/card/${encodeURIComponent(slug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          english:  document.getElementById('card-english').value.trim(),
+          japanese: document.getElementById('card-japanese').value.trim(),
+          reading:  document.getElementById('card-reading').value.trim(),
+          notes:    document.getElementById('card-notes').value,
+          image:    dropZone.getFilename(),
+        }),
+      });
+      isDirty = false;
+      saveBtn.hidden = true;
+      saveBtn.classList.remove('save-dirty');
+      statusEl.textContent = 'Saved';
+      fetch(`/api/wiki/card/${encodeURIComponent(slug)}`).then(r => r.ok ? r.json() : null).then(fresh => {
+        if (fresh) document.getElementById('card-notes-rendered').innerHTML = fresh.notesHtml || '';
+      }).catch(() => {});
+    } catch {
+      statusEl.textContent = 'Save failed';
+    } finally {
+      saveBtn.disabled = false;
+      setTimeout(() => { if (!isDirty) statusEl.textContent = ''; }, 2500);
+    }
+  }
+
+  const dropZone = makeDropZone(document.getElementById('drop-zone'), card.image || '', markDirty);
+  ['card-english', 'card-japanese', 'card-reading', 'card-notes'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', markDirty);
+  });
+  cardForm.addEventListener('submit', e => { e.preventDefault(); save(); });
+
+  document.getElementById('delete-btn').addEventListener('click', async () => {
+    if (!confirm(`Delete card "${slug}"?`)) return;
+    await fetch(`/api/wiki/card/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    history.pushState({}, '', '/wiki');
+    await renderWikiIndexPage();
+  });
+
+  // Image action buttons (same pattern as word page)
+  document.getElementById('find-image-btn').addEventListener('click', () => {
+    sessionStorage.setItem('sharedImageTarget', slug);
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(slug)}&tbm=isch`, '_blank');
+  });
+  if (navigator.clipboard?.read) document.getElementById('paste-image-btn').hidden = false;
+  document.getElementById('paste-image-btn').addEventListener('click', async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        const fd = new FormData();
+        fd.append('image', blob, `paste.${imgType.split('/')[1]}`);
+        const r = await fetch('/api/wiki/image-upload', { method: 'POST', body: fd });
+        if (r.ok) { const { filename } = await r.json(); dropZone.setFilename(filename); markDirty(); }
+        break;
+      }
+    } catch {}
+  });
+  document.getElementById('url-image-btn').addEventListener('click', () => {
+    const row = document.getElementById('url-image-row');
+    row.hidden = !row.hidden;
+    row.style.display = row.hidden ? '' : 'flex';
+    if (!row.hidden) document.getElementById('url-image-input').focus();
+  });
+  async function importFromUrl() {
+    const url = document.getElementById('url-image-input').value.trim();
+    if (!url) return;
+    try {
+      const r = await fetch('/api/wiki/image-from-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      if (r.ok) { const { filename } = await r.json(); dropZone.setFilename(filename); markDirty(); document.getElementById('url-image-row').hidden = true; }
+    } catch {}
+  }
+  document.getElementById('url-image-go').addEventListener('click', importFromUrl);
+  document.getElementById('url-image-input').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); importFromUrl(); } });
 }
 
 async function renderKanaPage(char) {
@@ -1845,13 +2068,18 @@ function renderWikiSearchResults(data, q) {
     resultsDiv.innerHTML = `<div class="msg">No wiki pages matching "${escHtml(q)}"</div>`;
     return;
   }
-  resultsDiv.innerHTML = data.results.map(r => `
-    <a class="wiki-result" href="/wiki/word/${encodeURIComponent(r.slug)}">
-      <span class="wiki-result-slug">${escHtml(r.slug)}</span>
-      ${r.reading ? `<span class="wiki-result-reading">${escHtml(r.reading)}</span>` : ''}
-      ${r.gloss   ? `<span class="wiki-result-gloss">${escHtml(r.gloss)}</span>`   : ''}
-    </a>
-  `).join('');
+  resultsDiv.innerHTML = data.results.map(r => {
+    const href = r.type === 'card' ? `/wiki/card/${encodeURIComponent(r.slug)}` : `/wiki/word/${encodeURIComponent(r.slug)}`;
+    const badge = r.type === 'card' ? `<span class="wiki-result-badge">card</span>` : '';
+    return `
+      <a class="wiki-result" href="${href}">
+        <span class="wiki-result-slug">${escHtml(r.slug)}</span>
+        ${badge}
+        ${r.reading ? `<span class="wiki-result-reading">${escHtml(r.reading)}</span>` : ''}
+        ${r.gloss   ? `<span class="wiki-result-gloss">${escHtml(r.gloss)}</span>`   : ''}
+      </a>
+    `;
+  }).join('');
 }
 
 // ─── Search input ─────────────────────────────────────────────────────────────
@@ -1904,6 +2132,9 @@ async function router() {
 
   } else if (parts[0] === 'wiki' && parts[1] === 'word' && parts[2]) {
     await renderWikiWordPage(decodeURIComponent(parts[2]));
+
+  } else if (parts[0] === 'wiki' && parts[1] === 'card' && parts[2] === 'new') {
+    await renderNewCardPage();
 
   } else if (parts[0] === 'wiki' && parts[1] === 'card' && parts[2]) {
     await renderWikiCardPage(decodeURIComponent(parts[2]));

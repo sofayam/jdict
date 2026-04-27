@@ -249,6 +249,27 @@ app.get('/api/wiki/index', async (req, res) => {
   }
 });
 
+app.post('/api/wiki/card', (req, res) => {
+  const { slug, english, japanese, reading, notes } = req.body;
+  if (!slug?.trim()) return res.status(400).json({ error: 'slug required' });
+  if (wiki.getCardPage(slug.trim())) return res.status(409).json({ error: 'Card already exists' });
+  wiki.saveCardPage(slug.trim(), { english, japanese, reading, notes });
+  res.json({ slug: slug.trim() });
+});
+
+app.delete('/api/wiki/card/:slug', (req, res) => {
+  if (!wiki.getCardPage(req.params.slug)) return res.status(404).json({ error: 'Card not found' });
+  wiki.deleteCardPage(req.params.slug);
+  res.json({ ok: true });
+});
+
+app.put('/api/wiki/card/:slug', (req, res) => {
+  const { english, japanese, reading, image, notes } = req.body;
+  if (!wiki.getCardPage(req.params.slug)) return res.status(404).json({ error: 'Card not found' });
+  wiki.saveCardPage(req.params.slug, { english, japanese, reading, image, notes });
+  res.json({ ok: true });
+});
+
 app.get('/api/wiki/card/:slug', async (req, res) => {
   try {
     const page = await wiki.getCardPage(req.params.slug);

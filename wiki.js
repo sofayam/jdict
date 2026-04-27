@@ -161,6 +161,17 @@ function getCardPage(slug) {
   };
 }
 
+function saveCardPage(slug, data) {
+  const db = getWikiDb();
+  const v = [data.english || '', data.japanese || '', data.reading || '', data.image || '', data.notes || ''];
+  const exists = db.prepare('SELECT slug FROM wiki_cards WHERE slug = ?').get(slug);
+  if (exists) {
+    db.prepare('UPDATE wiki_cards SET english=?, japanese=?, reading=?, image=?, notes=? WHERE slug=?').run(...v, slug);
+  } else {
+    db.prepare('INSERT INTO wiki_cards (slug, english, japanese, reading, image, notes) VALUES (?,?,?,?,?,?)').run(slug, ...v);
+  }
+}
+
 // ─────────────────────────────────────────────
 // Index / browse queries
 // ─────────────────────────────────────────────
@@ -246,7 +257,11 @@ function getWikiBrowseData() {
     'SELECT slug, updated_at, created_at FROM wiki_words ORDER BY created_at DESC LIMIT 50'
   ).all();
 
-  return { words: allWords, tags, podcasts, stats, recentUpdated, recentCreated };
+  const allCards = db.prepare(
+    'SELECT slug, english, japanese, reading FROM wiki_cards ORDER BY slug'
+  ).all();
+
+  return { words: allWords, tags, podcasts, stats, recentUpdated, recentCreated, cards: allCards };
 }
 
 // ─────────────────────────────────────────────
@@ -287,6 +302,20 @@ function searchWiki(q, jdictDb) {
         const slug = seqToSlug[m.seq];
         if (slug && !resultMap.has(slug)) resultMap.set(slug, { slug, seq: m.seq });
       }
+    }
+  }
+
+  // 3. Card matches — slug, japanese, english
+  for (const r of db.prepare(`
+    SELECT slug, english, japanese, reading FROM wiki_cards
+    WHERE slug LIKE ? OR japanese LIKE ? OR english LIKE ?
+    ORDER BY slug LIMIT 50
+  `).all(`%${q}%`, `%${q}%`, `%${q}%`)) {
+    if (!resultMap.has(`card:${r.slug}`)) {
+      resultMap.set(`card:${r.slug}`, {
+        slug: r.slug, type: 'card',
+        reading: r.reading || '', gloss: r.english || '',
+      });
     }
   }
 
@@ -437,6 +466,8 @@ module.exports = {
   getWordsForTag,
   saveTagPage,
   getCardPage,
+  saveCardPage,
+  deleteCardPage: (slug) => getWikiDb().prepare('DELETE FROM wiki_cards WHERE slug = ?').run(slug),
   getKanaIndex,
   getKanaWords,
   getKanjiCoverage,
