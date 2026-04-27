@@ -164,7 +164,8 @@ function getKanji(char) {
   const db = getDb();
   const row = db.prepare('SELECT * FROM kanji WHERE literal = ?').get(char);
   if (!row) return null;
-  const comp = db.prepare('SELECT components_json FROM kanji_components WHERE kanji = ?').get(char);
+  const comp    = db.prepare('SELECT components_json FROM kanji_components WHERE kanji = ?').get(char);
+  const stories = db.prepare('SELECT * FROM kanji_stories WHERE literal = ?').get(char);
   return {
     literal:     row.literal,
     grade:       row.grade,
@@ -175,6 +176,12 @@ function getKanji(char) {
     kun:         JSON.parse(row.kun_json     || '[]'),
     meanings:    JSON.parse(row.meanings_json || '[]'),
     components:  comp ? JSON.parse(comp.components_json) : [],
+    stories: stories ? {
+      keyword:        stories.keyword,
+      heisig_story:   stories.heisig_story,
+      heisig_comment: stories.heisig_comment,
+      koohi: [stories.koohi_1, stories.koohi_2, stories.koohi_3, stories.koohi_4, stories.koohi_5].filter(Boolean),
+    } : null,
   };
 }
 

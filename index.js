@@ -292,8 +292,11 @@ app.get('/api/wiki/kanji/:char', (req, res) => {
   const char = req.params.char;
   if (!char || [...char].length !== 1) return res.status(400).json({ error: 'Single character required' });
   const kanjiData = database.getKanji(char);
+  const cp = char.codePointAt(0).toString(16).padStart(5, '0');
+  const svgFile = path.join(__dirname, 'sources', 'kanjivg', `${cp}.svg`);
+  const kanji = kanjiData ? { ...kanjiData, svg_path: fs.existsSync(svgFile) ? `/kanjivg/${cp}.svg` : null } : null;
   const pages = wiki.getKanjiPages(char);
-  res.json({ kanji: kanjiData || null, ...pages });
+  res.json({ kanji, ...pages });
 });
 
 app.get('/api/wiki/tags', async (req, res) => {

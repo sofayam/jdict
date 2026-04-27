@@ -151,7 +151,6 @@ for (const [label, p] of [['DB', dbPath], ['KANJIDIC2', kanjidicPath], ['KRADFIL
 }
 
 const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
 
 createSchema(db);
 importKanjidic(db, kanjidicPath);

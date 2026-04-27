@@ -20,6 +20,9 @@ node importer.js --xml sources/JMDict --db data/jdict.db
 # Import KANJIDIC2 + KRADFILE into jdict.db (one-time setup)
 node kanjiimporter.js
 
+# Import Koohi/Heisig kanji stories into jdict.db (one-time setup, run after kanjiimporter)
+node storiesImporter.js
+
 # Import Tatoeba example sentences into data/tatoeba.db (one-time setup)
 # Also reads sources/tatoeba/jpn_transcriptions.tsv for furigana readings
 node tatoebaImporter.js

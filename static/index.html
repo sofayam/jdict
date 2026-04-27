@@ -364,14 +364,18 @@
   .kana-word-english { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
 
   .kanji-grid { display: flex; flex-wrap: wrap; gap: 3px; margin: 8px 0 12px; }
-  .kanji-cell { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 4px; font-size: 17px; text-decoration: none; color: var(--text); background: var(--bg2, #f0f0f0); }
-  .kanji-cell-none { color: var(--muted); opacity: 0.3; cursor: default; }
+  .kanji-cell { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 4px; font-size: 17px; text-decoration: none; color: var(--text); background: var(--bg2, #f0f0f0); border: none; cursor: pointer; font-family: inherit; padding: 0; }
+  .kanji-cell-none { color: var(--muted); opacity: 0.3; }
   .kanji-cell-notes { background: #d4edda; color: #155724; }
   .kanji-cell-headword { background: #cce5ff; color: #004085; }
-  .kanji-cell:not(.kanji-cell-none):hover { filter: brightness(0.88); }
+  .kanji-cell:hover { filter: brightness(0.88); }
   .kanji-detail-info { font-size: 14px; color: var(--muted); line-height: 1.7; margin-bottom: 4px; }
   .kanji-detail-label { font-weight: 600; color: var(--text); margin-right: 4px; }
   .kanji-detail-meanings { color: var(--text); font-size: 15px; }
+  .kanji-story-text { font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
+  .kanji-story-comment { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 4px 0 0; }
+  .kanji-koohi-list { margin: 6px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; }
+  .kanji-koohi-list li { margin-bottom: 6px; }
 
   /* Image action buttons (Find / Paste) */
   .image-actions { display: flex; gap: 8px; margin: -8px 0 14px; flex-wrap: wrap; }
@@ -546,6 +550,9 @@
     margin-bottom: 8px;
   }
   .kanji-components { font-size: 15px; margin-top: 4px; }
+  .kanji-sheet-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 16px; margin-bottom: 2px; }
+  .kanji-sheet-wiki-pages { font-size: 13px; margin: 4px 0; line-height: 1.8; }
+  .kanji-sheet-wiki-notes { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -1471,11 +1478,17 @@ async function renderWikiIndexPage() {
       kanjiGridLoaded = true;
       fetch('/api/wiki/kanji-coverage').then(r => r.json()).then(rows => {
         const cells = rows.map(r => {
-          if (r.status === 'none') return `<span class="kanji-cell kanji-cell-none">${escHtml(r.literal)}</span>`;
-          const cls = r.status === 'headword' ? 'kanji-cell kanji-cell-headword' : 'kanji-cell kanji-cell-notes';
-          return `<a href="/wiki/kanji/${encodeURIComponent(r.literal)}" class="${cls}">${escHtml(r.literal)}</a>`;
+          const cls = r.status === 'headword' ? 'kanji-cell kanji-cell-headword'
+                    : r.status === 'notes'    ? 'kanji-cell kanji-cell-notes'
+                    : 'kanji-cell kanji-cell-none';
+          return `<button class="${cls}" data-char="${escAttr(r.literal)}">${escHtml(r.literal)}</button>`;
         }).join('');
-        document.getElementById('kanji-grid-container').innerHTML = `<div class="kanji-grid">${cells}</div>`;
+        const grid = document.getElementById('kanji-grid-container');
+        grid.innerHTML = `<div class="kanji-grid">${cells}</div>`;
+        grid.addEventListener('click', e => {
+          const btn = e.target.closest('[data-char]');
+          if (btn) showKanjiSheet(btn.dataset.char);
+        });
       });
     }
   }
@@ -1587,9 +1600,27 @@ async function renderKanjiDetailPage(char) {
     ).join('')}</ul>`;
   }
 
+  let storiesHtml = '';
+  if (k?.stories) {
+    const s = k.stories;
+    const heisigHtml = [
+      s.heisig_story   ? `<p class="kanji-story-text">${escHtml(s.heisig_story)}</p>` : '',
+      s.heisig_comment ? `<p class="kanji-story-comment">${escHtml(s.heisig_comment)}</p>` : '',
+    ].join('');
+    const koohiHtml = s.koohi.length
+      ? `<ol class="kanji-koohi-list">${s.koohi.map(t => `<li>${escHtml(t)}</li>`).join('')}</ol>`
+      : '';
+    storiesHtml = `
+      ${s.keyword ? `<div style="margin-top:12px"><span class="kanji-detail-label">Keyword</span> ${escHtml(s.keyword)}</div>` : ''}
+      ${heisigHtml ? `<div class="section-label" style="margin-top:16px">Heisig</div>${heisigHtml}` : ''}
+      ${koohiHtml  ? `<div class="section-label" style="margin-top:16px">Koohi</div>${koohiHtml}`   : ''}
+    `;
+  }
+
   resultsDiv.innerHTML = `
     <div style="font-size:40px;font-weight:bold;margin:8px 0 4px">${escHtml(char)}</div>
     ${infoHtml}
+    ${storiesHtml}
     ${data.headwordPages.length ? `<div class="section-label" style="margin-top:16px">In headwords (${data.headwordPages.length})</div>${wordList(data.headwordPages)}` : ''}
     ${data.notesPages.length   ? `<div class="section-label" style="margin-top:16px">In notes only (${data.notesPages.length})</div>${wordList(data.notesPages)}`   : ''}
     ${!data.headwordPages.length && !data.notesPages.length ? '<p class="wiki-none" style="margin-top:16px">No wiki pages contain this kanji</p>' : ''}
@@ -1695,7 +1726,7 @@ async function showKanjiSheet(char) {
 
   let data;
   try {
-    const res = await fetch(`/api/kanji/${encodeURIComponent(char)}`);
+    const res = await fetch(`/api/wiki/kanji/${encodeURIComponent(char)}`);
     if (!res.ok) { body.innerHTML = `<div class="kanji-sheet-char">${escHtml(char)}</div><div class="msg" style="padding:16px 0">No data for this character</div>`; return; }
     data = await res.json();
   } catch {
@@ -1703,23 +1734,52 @@ async function showKanjiSheet(char) {
     return;
   }
 
-  const jlptLabel  = data.jlpt  ? `N${data.jlpt}` : '';
-  const gradeLabel = data.grade ? `Grade ${data.grade}` : '';
-  const strokeLabel = data.stroke_count ? `${data.stroke_count} strokes` : '';
-  const meta = [strokeLabel, gradeLabel, jlptLabel].filter(Boolean).join(' · ');
+  const k = data.kanji || {};
+  const meta = [
+    k.stroke_count ? `${k.stroke_count} strokes` : '',
+    k.grade  ? `Grade ${k.grade}` : '',
+    k.jlpt   ? `N${k.jlpt}` : '',
+  ].filter(Boolean).join(' · ');
+
+  let storiesHtml = '';
+  if (k.stories) {
+    const s = k.stories;
+    storiesHtml = [
+      s.keyword ? `<div style="margin-top:12px"><span class="kanji-reading-label">Keyword</span>${escHtml(s.keyword)}</div>` : '',
+      (s.heisig_story || s.heisig_comment) ? `
+        <div class="kanji-sheet-section-label">Heisig</div>
+        ${s.heisig_story   ? `<p class="kanji-story-text">${escHtml(s.heisig_story)}</p>` : ''}
+        ${s.heisig_comment ? `<p class="kanji-story-comment">${escHtml(s.heisig_comment)}</p>` : ''}` : '',
+      s.koohi?.length ? `
+        <div class="kanji-sheet-section-label">Koohi</div>
+        <ol class="kanji-koohi-list">${s.koohi.map(t => `<li>${escHtml(t)}</li>`).join('')}</ol>` : '',
+    ].join('');
+  }
+
+  const headwords = data.headwordPages || [];
+  const notes     = data.notesPages    || [];
+  let wikiHtml = '';
+  if (headwords.length || notes.length) {
+    const link = s => `<a href="/wiki/word/${encodeURIComponent(s)}" onclick="closeKanjiSheet()">${escHtml(s)}</a>`;
+    wikiHtml = `<div class="kanji-sheet-section-label" style="margin-top:16px">Wiki pages</div>`;
+    if (headwords.length) wikiHtml += `<div class="kanji-sheet-wiki-pages">${headwords.map(link).join(' ')}</div>`;
+    if (notes.length)     wikiHtml += `<div class="kanji-sheet-wiki-pages kanji-sheet-wiki-notes">In notes: ${notes.map(link).join(' ')}</div>`;
+  }
 
   body.innerHTML = `
     <div class="kanji-sheet-char">${escHtml(char)}</div>
     <div class="kanji-sheet-svg" id="kanji-svg-slot"></div>
-    ${data.on?.length  ? `<div class="kanji-reading-row"><span class="kanji-reading-label">On</span>${data.on.join('　')}</div>` : ''}
-    ${data.kun?.length ? `<div class="kanji-reading-row"><span class="kanji-reading-label">Kun</span>${data.kun.join('　')}</div>` : ''}
-    ${data.meanings?.length ? `<div class="kanji-meanings">${data.meanings.map(escHtml).join(' · ')}</div>` : ''}
+    ${k.on?.length  ? `<div class="kanji-reading-row"><span class="kanji-reading-label">On</span>${k.on.join('　')}</div>` : ''}
+    ${k.kun?.length ? `<div class="kanji-reading-row"><span class="kanji-reading-label">Kun</span>${k.kun.join('　')}</div>` : ''}
+    ${k.meanings?.length ? `<div class="kanji-meanings">${k.meanings.map(escHtml).join(' · ')}</div>` : ''}
     ${meta ? `<div class="kanji-meta">${escHtml(meta)}</div>` : ''}
-    ${data.components?.length ? `<div class="kanji-components"><span class="kanji-reading-label">Parts</span>${data.components.map(escHtml).join(' ')}</div>` : ''}
+    ${k.components?.length ? `<div class="kanji-components"><span class="kanji-reading-label">Parts</span>${k.components.map(escHtml).join(' ')}</div>` : ''}
+    ${storiesHtml}
+    ${wikiHtml}
   `;
 
-  if (data.svg_path) {
-    fetch(data.svg_path).then(r => r.text()).then(svgText => {
+  if (k.svg_path) {
+    fetch(k.svg_path).then(r => r.text()).then(svgText => {
       const slot = document.getElementById('kanji-svg-slot');
       if (!slot) return;
       const svgDoc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
