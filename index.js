@@ -317,7 +317,8 @@ app.get('/api/wiki/kanji/:char', (req, res) => {
   const svgFile = path.join(__dirname, 'sources', 'kanjivg', `${cp}.svg`);
   const kanji = kanjiData ? { ...kanjiData, svg_path: fs.existsSync(svgFile) ? `/kanjivg/${cp}.svg` : null } : null;
   const pages = wiki.getKanjiPages(char);
-  res.json({ kanji, ...pages });
+  const entries = database.getEntriesForKanji(char, 100);
+  res.json({ kanji, ...pages, entries });
 });
 
 app.get('/api/wiki/tags', async (req, res) => {

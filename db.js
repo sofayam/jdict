@@ -185,6 +185,28 @@ function getKanji(char) {
   };
 }
 
+function getEntriesForKanji(char, limit = 100) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT e.seq, e.kanji_json, e.kana_json, e.senses_json
+    FROM entries e
+    JOIN entries_text t ON t.seq = e.seq
+    WHERE t.kanji LIKE ?
+    ORDER BY
+      CASE e.jlpt WHEN 'N5' THEN 1 WHEN 'N4' THEN 2 WHEN 'N3' THEN 3 WHEN 'N2' THEN 4 WHEN 'N1' THEN 5 ELSE 6 END,
+      e.seq
+    LIMIT ?
+  `).all(`%${char}%`, limit).map(row => {
+    const kanji  = JSON.parse(row.kanji_json  || '[]');
+    const kana   = JSON.parse(row.kana_json   || '[]');
+    const senses = JSON.parse(row.senses_json || '[]');
+    const form   = kanji[0]?.keb || kana[0]?.reb || '';
+    const read   = kanji.length ? (kana[0]?.reb || '') : '';
+    const gloss  = senses[0]?.glosses?.find(g => g.lang === 'eng')?.text || '';
+    return { seq: row.seq, form, read, gloss };
+  });
+}
+
 module.exports = {
   DB_PATH,
   dbExists,
@@ -195,4 +217,5 @@ module.exports = {
   randomEntries,
   entryCount,
   getKanji,
+  getEntriesForKanji,
 };

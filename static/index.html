@@ -567,6 +567,11 @@
   .kanji-sheet-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 16px; margin-bottom: 2px; }
   .kanji-sheet-wiki-pages { font-size: 13px; margin: 4px 0; line-height: 1.8; }
   .kanji-sheet-wiki-notes { color: var(--muted); }
+  .kanji-sheet-dict-entries { font-size: 13px; margin: 4px 0; }
+  .kanji-sheet-dict-entry { display: flex; gap: 6px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .kanji-sheet-dict-entry a { font-weight: 500; min-width: 4em; }
+  .kanji-sheet-entry-read { color: var(--muted); flex-shrink: 0; }
+  .kanji-sheet-entry-gloss { color: var(--text); flex: 1; }
 </style>
 </head>
 <body>
@@ -877,7 +882,7 @@ async function renderEntryPage(seq) {
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
-        <span class="kanji">${entry.kanji.map(k => k.keb).join('、') || entry.kana.map(k => k.reb).join('、')}</span>
+        <span class="kanji">${entry.kanji.map(k => wrapKanji(k.keb)).join('、') || entry.kana.map(k => k.reb).join('、')}</span>
         ${entry.kanji.length ? `<span class="kana">${entry.kana.map(k => k.reb).join('、')}</span>` : ''}
       </div>
       ${renderSenses(entry.senses)}
@@ -891,12 +896,12 @@ async function renderEntryPage(seq) {
   `;
 
   if (hasWiki) {
-    document.getElementById('wiki-btn').addEventListener('click', () => {
+    document.getElementById('wiki-btn').addEventListener('click', async () => {
       if (podcastName) {
         const ctx = { source: pageSource || `entry:${entry.seq}`, timestamp: new Date().toISOString(),
                       podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs };
         const updated = { ...wikiData, contexts: [...(wikiData.contexts || []), ctx] };
-        fetch(`/api/wiki/word/${slug}`, {
+        await fetch(`/api/wiki/word/${slug}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(updated),
@@ -1098,7 +1103,7 @@ async function renderWikiWordPage(slug) {
   }
 
   const tagWidget = makeTagWidget(document.getElementById('tag-box'), wiki.tags || [], () => save());
-  const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '', markDirty);
+  const dropZone  = makeDropZone(document.getElementById('drop-zone'), wiki.image || '', save);
 
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
   document.getElementById('wiki-form').addEventListener('submit', e => { e.preventDefault(); save(); });
@@ -1126,7 +1131,7 @@ async function renderWikiWordPage(slug) {
             const { filename } = await res.json();
             dropZone.setImage(filename);
             setEditMode(true);
-            markDirty();
+            save();
             return;
           }
         }
@@ -1159,7 +1164,7 @@ async function renderWikiWordPage(slug) {
       if (!res.ok) throw new Error(data.error || 'Failed');
       dropZone.setImage(data.filename);
       setEditMode(true);
-      markDirty();
+      save();
       input.value = '';
       document.getElementById('url-image-row').hidden = true;
     } catch (err) {
@@ -1180,7 +1185,6 @@ async function renderWikiWordPage(slug) {
   if (pendingImage) {
     sessionStorage.removeItem('pendingImage');
     dropZone.setImage(pendingImage);
-    markDirty();
     save();
   }
 
@@ -1989,6 +1993,23 @@ async function showKanjiSheet(char) {
     if (notes.length)     wikiHtml += `<div class="kanji-sheet-wiki-pages kanji-sheet-wiki-notes">In notes: ${notes.map(link).join(' ')}</div>`;
   }
 
+  const dictEntries = data.entries || [];
+  let dictHtml = '';
+  if (dictEntries.length) {
+    const sheetPodParams = podcastName
+      ? `?podcast=${encodeURIComponent(podcastName)}&episode=${encodeURIComponent(podcastEp)}&timestamp=${encodeURIComponent(podcastTs)}`
+      : '';
+    dictHtml = `<div class="kanji-sheet-section-label" style="margin-top:16px">In dictionary (${dictEntries.length})</div>
+      <div class="kanji-sheet-dict-entries">
+        ${dictEntries.map(e => `
+          <div class="kanji-sheet-dict-entry">
+            <a href="/entry/${e.seq}${sheetPodParams}" onclick="closeKanjiSheet()">${escHtml(e.form)}</a>
+            ${e.read ? `<span class="kanji-sheet-entry-read">${escHtml(e.read)}</span>` : ''}
+            ${e.gloss ? `<span class="kanji-sheet-entry-gloss">${escHtml(e.gloss)}</span>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
   body.innerHTML = `
     <div class="kanji-sheet-char">${escHtml(char)}</div>
     <div class="kanji-sheet-svg" id="kanji-svg-slot"></div>
@@ -1999,6 +2020,7 @@ async function showKanjiSheet(char) {
     ${k.components?.length ? `<div class="kanji-components"><span class="kanji-reading-label">Parts</span>${k.components.map(escHtml).join(' ')}</div>` : ''}
     ${storiesHtml}
     ${wikiHtml}
+    ${dictHtml}
   `;
 
   if (k.svg_path) {
