@@ -232,6 +232,8 @@
 
   /* Save button: only shown when dirty, always red */
   button.save-dirty { background: #c00; color: #fff; border-color: #c00; }
+  button.delete-btn { background: none; color: #c00; border-color: #c00; font-size: 13px; padding: 4px 10px; }
+  .wiki-form.view-mode button.delete-btn { display: none; }
 
   /* Tag lozenge input */
   .tag-box {
@@ -1118,6 +1120,7 @@ async function renderWikiWordPage(slug) {
 
       <div class="form-row">
         <button type="submit" class="primary" id="save-btn" hidden>Save</button>
+        <button type="button" class="delete-btn" id="delete-wiki-btn">Delete page</button>
         <span class="save-status" id="save-status"></span>
       </div>
     </form>
@@ -1182,6 +1185,13 @@ async function renderWikiWordPage(slug) {
 
   document.getElementById('wiki-notes').addEventListener('input', markDirty);
   document.getElementById('wiki-form').addEventListener('submit', e => { e.preventDefault(); save(); });
+
+  document.getElementById('delete-wiki-btn').addEventListener('click', async () => {
+    if (!confirm(`Delete wiki page "${slug}"?`)) return;
+    await fetch(`/api/wiki/word/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    history.pushState({}, '', '/');
+    router();
+  });
 
   // ── Image actions ──────────────────────────────────────────────────────────
   document.getElementById('find-image-btn').addEventListener('click', () => {

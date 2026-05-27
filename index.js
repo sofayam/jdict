@@ -376,6 +376,13 @@ app.post('/api/wiki/word/:word', async (req, res) => {
   }
 });
 
+app.delete('/api/wiki/word/:word', (req, res) => {
+  const slug = req.params.word;
+  if (!wiki.wordExists(slug)) return res.status(404).json({ error: 'Wiki page not found' });
+  wiki.deleteWordPage(slug);
+  res.json({ ok: true });
+});
+
 app.get('/api/wiki/tag/:name', async (req, res) => {
   try {
     const tagName = req.params.name;

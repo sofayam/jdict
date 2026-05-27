@@ -478,6 +478,7 @@ module.exports = {
   saveTagPage,
   getCardPage,
   saveCardPage,
+  deleteWordPage: (slug) => getWikiDb().prepare('DELETE FROM wiki_words WHERE slug = ?').run(slug),
   deleteCardPage: (slug) => getWikiDb().prepare('DELETE FROM wiki_cards WHERE slug = ?').run(slug),
   getKanaIndex,
   getKanaWords,
