@@ -119,6 +119,16 @@ function getAllTags() {
   return getWikiDb().prepare('SELECT name FROM wiki_tags ORDER BY name').all().map(r => r.name);
 }
 
+function getPopularTags(limit = 20) {
+  return getWikiDb().prepare(`
+    SELECT tag.value as name, COUNT(*) as count
+    FROM wiki_words, json_each(tags) as tag
+    GROUP BY tag.value
+    ORDER BY count DESC
+    LIMIT ?
+  `).all(limit);
+}
+
 function getTagPage(tagName) {
   const row = getWikiDb().prepare('SELECT * FROM wiki_tags WHERE name = ?').get(tagName);
   if (!row) return null;
@@ -460,6 +470,7 @@ module.exports = {
   wordExists,
   saveWordPage,
   getAllTags,
+  getPopularTags,
   getWikiIndexData,
   getWikiBrowseData,
   getTagPage,

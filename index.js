@@ -331,6 +331,17 @@ app.get('/api/wiki/tags', async (req, res) => {
   }
 });
 
+app.get('/api/wiki/popular-tags', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const tags = await wiki.getPopularTags(limit);
+    res.json(tags);
+  } catch (error) {
+    console.error('Failed to get popular tags:', error);
+    res.status(500).json({ error: 'Failed to get popular tags' });
+  }
+});
+
 app.post('/api/wiki/exists', async (req, res) => {
   const { slugs } = req.body;
   if (!Array.isArray(slugs)) return res.status(400).json({ error: 'slugs must be an array' });

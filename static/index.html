@@ -276,6 +276,37 @@
   }
   .lozenge-x:hover { color: var(--text); }
 
+  /* Tag dropdown */
+  .tag-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  .tag-dropdown.open { display: block; }
+  .tag-dropdown-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .tag-dropdown-item:hover { background: var(--tag-bg); }
+  .tag-dropdown-item .tag-count {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .tag-box { position: relative; }
+
   /* Image drop zone */
   .drop-zone {
     border: 2px dashed var(--border);
@@ -588,7 +619,6 @@
   <div id="meta"></div>
   <div id="results"><div class="msg">Enter text to search</div></div>
   <div id="pagination"></div>
-  <datalist id="tags-list"></datalist>
 </main>
 
 <div id="kanji-backdrop"></div>
@@ -634,8 +664,6 @@ const resultsDiv   = document.getElementById('results');
 const metaDiv      = document.getElementById('meta');
 const paginationDiv = document.getElementById('pagination');
 const statusDiv    = document.getElementById('status');
-const tagsDatalist = document.getElementById('tags-list');
-
 let currentQuery  = '';
 let currentOffset = 0;
 let debounceTimer = null;
@@ -662,19 +690,15 @@ async function checkStatus() {
   } catch { statusDiv.textContent = 'Offline'; }
 }
 
-// ─── Tags datalist ────────────────────────────────────────────────────────────
-
-async function populateTagsDatalist() {
-  try {
-    const tags = await fetch('/api/wiki/tags').then(r => r.json());
-    tagsDatalist.innerHTML = tags.map(t => `<option value="${t}">`).join('');
-  } catch {}
-}
-
 // ─── Tag lozenge widget ───────────────────────────────────────────────────────
 
 function makeTagWidget(container, initialTags, onChange) {
   let tags = [...initialTags];
+  let popularTags = [];
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'tag-dropdown';
+  container.appendChild(dropdown);
 
   function renderLozenges() {
     container.querySelectorAll('.lozenge').forEach(el => el.remove());
@@ -687,13 +711,37 @@ function makeTagWidget(container, initialTags, onChange) {
     });
   }
 
+  function renderDropdown(filter = '') {
+    const q = filter.toLowerCase();
+    const filtered = q
+      ? popularTags.filter(t => t.name.toLowerCase().includes(q) && !tags.includes(t.name))
+      : popularTags.filter(t => !tags.includes(t.name));
+    if (!filtered.length) { dropdown.classList.remove('open'); return; }
+    dropdown.innerHTML = filtered.map(t =>
+      `<div class="tag-dropdown-item" data-tag="${t.name}">${escHtml(t.name)} <span class="tag-count">${t.count}</span></div>`
+    ).join('');
+    dropdown.classList.add('open');
+  }
+
+  function addTag(val) {
+    val = val.trim();
+    if (val && !tags.includes(val)) {
+      tags.push(val);
+      renderLozenges();
+      onChange?.();
+    }
+    input.value = '';
+    renderDropdown('');
+    input.focus();
+  }
+
   container.addEventListener('click', e => {
     if (e.target.classList.contains('lozenge-x')) {
       tags = tags.filter(t => t !== e.target.dataset.tag);
       renderLozenges();
+      renderDropdown(input.value);
       onChange?.();
     } else if (e.target.closest('a')) {
-      // In edit mode, suppress navigation and focus the input instead
       if (!container.closest('form')?.classList.contains('view-mode')) {
         e.preventDefault();
         container.querySelector('.tag-text-input').focus();
@@ -703,18 +751,46 @@ function makeTagWidget(container, initialTags, onChange) {
     }
   });
 
+  dropdown.addEventListener('mousedown', e => {
+    const item = e.target.closest('.tag-dropdown-item');
+    if (item) {
+      e.preventDefault();
+      addTag(item.dataset.tag);
+    }
+  });
+
   const input = container.querySelector('.tag-text-input');
+  input.addEventListener('focus', () => {
+    if (!popularTags.length) {
+      fetch('/api/wiki/popular-tags?limit=50').then(r => r.json()).then(data => {
+        popularTags = data;
+        renderDropdown(input.value);
+      }).catch(() => {});
+    } else {
+      renderDropdown(input.value);
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => dropdown.classList.remove('open'), 200);
+  });
+
+  input.addEventListener('input', () => {
+    renderDropdown(input.value);
+  });
+
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       const val = input.value.trim().replace(/,+$/, '');
-      if (val && !tags.includes(val)) { tags.push(val); renderLozenges(); onChange?.(); }
-      else if (val && tags.includes(val)) { input.value = ''; } // already exists, just clear
-      input.value = '';
+      if (val) { addTag(val); }
     } else if (e.key === 'Backspace' && input.value === '' && tags.length) {
       tags.pop();
       renderLozenges();
+      renderDropdown('');
       onChange?.();
+    } else if (e.key === 'Escape') {
+      dropdown.classList.remove('open');
     }
   });
 
@@ -1019,7 +1095,7 @@ async function renderWikiWordPage(slug) {
     <form class="wiki-form view-mode" id="wiki-form">
       <label>Tags</label>
       <div class="tag-box" id="tag-box">
-        <input class="tag-text-input" type="text" list="tags-list" placeholder="Add tag…">
+        <input class="tag-text-input" type="text" placeholder="Add tag…">
       </div>
 
       <label for="wiki-notes">Notes</label>
@@ -1089,7 +1165,6 @@ async function renderWikiWordPage(slug) {
       saveBtn.hidden = true;
       saveBtn.classList.remove('save-dirty');
       statusEl.textContent = 'Saved';
-      populateTagsDatalist();
       // Refresh the rendered notes so view mode shows the updated content
       fetch(`/api/wiki/word/${slug}`).then(r => r.ok ? r.json() : null).then(fresh => {
         if (fresh) document.getElementById('wiki-notes-rendered').innerHTML = fresh.notesHtml || '';
@@ -2192,7 +2267,6 @@ async function router() {
   }
 }
 
-populateTagsDatalist();
 fetch('/api/config').then(r => r.json()).then(cfg => { window._jdictConfig = cfg; });
 
 // Handle image shared via Web Share Target
