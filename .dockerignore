@@ -10,4 +10,17 @@ __pycache__/
 *.pyc
 *.tar
 WORDS.db
+LLMReports/
 *.md
+requirements.txt
+docker-compose.yml
+Makefile
+ankiimport.js
+ankiimport.md
+importer.js
+kanjiimporter.js
+storiesImporter.js
+tatoebaImporter.js
+tatoebaAddReadings.js
+wiki-migrate.js
+import-words.js
