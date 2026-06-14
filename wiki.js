@@ -271,7 +271,16 @@ function getWikiBrowseData() {
     'SELECT slug, english, japanese, reading FROM wiki_cards ORDER BY slug'
   ).all();
 
-  return { words: allWords, tags, podcasts, stats, recentUpdated, recentCreated, cards: allCards };
+  const mostPodcastLinked = db.prepare(`
+    SELECT w.slug, COUNT(*) as podcast_count
+    FROM wiki_words w, json_each(w.contexts) as ctx
+    WHERE json_extract(ctx.value, '$.podcast') IS NOT NULL
+    GROUP BY w.slug
+    ORDER BY podcast_count DESC
+    LIMIT 20
+  `).all();
+
+  return { words: allWords, tags, podcasts, stats, recentUpdated, recentCreated, cards: allCards, mostPodcastLinked };
 }
 
 // ─────────────────────────────────────────────

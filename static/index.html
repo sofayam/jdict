@@ -358,6 +358,31 @@
   .wiki-tab-panel { display: none; }
   .wiki-tab-panel.active { display: block; }
 
+  .recent-subtabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+    gap: 0;
+  }
+  .recent-subtab {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    white-space: nowrap;
+  }
+  .recent-subtab:hover { color: var(--text); }
+  .recent-subtab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .recent-subpanel { display: none; }
+  .recent-subpanel.active { display: block; }
+
   /* Recent words list */
   .recent-list { list-style: none; padding: 0; }
   .recent-list li { display: flex; align-items: baseline; justify-content: space-between; padding: 6px 2px; border-bottom: 1px solid var(--border); }
@@ -1540,13 +1565,20 @@ async function renderWikiIndexPage() {
     ).join('')}</ul>`;
   }
 
+  function podcastLinkList(rows) {
+    if (!rows.length) return '<p class="wiki-none">Nothing yet</p>';
+    return `<ul class="recent-list">${rows.map(r =>
+      `<li><a href="/wiki/word/${encodeURIComponent(r.slug)}">${escHtml(r.slug)}</a><span class="recent-date">${r.podcast_count} link${r.podcast_count === 1 ? '' : 's'}</span></li>`
+    ).join('')}</ul>`;
+  }
+
   resultsDiv.innerHTML = `
     <div style="font-size:22px;font-weight:bold;margin:12px 0 4px">Wiki &nbsp;<a href="/wiki/card/new" style="font-size:13px;font-weight:normal;vertical-align:middle">+ New Card</a></div>
     <div class="wiki-stats">${wordCount} words · ${podcastCount} podcasts${dateRange ? ` · ${dateRange}` : ''}</div>
 
     <div class="wiki-tabs">
       <button class="wiki-tab" data-tab="index">Index</button>
-      <button class="wiki-tab" data-tab="recent">Recent</button>
+      <button class="wiki-tab" data-tab="recent">Lists</button>
       <button class="wiki-tab" data-tab="tags">Tags</button>
       <button class="wiki-tab" data-tab="podcasts">Podcasts</button>
       <button class="wiki-tab" data-tab="cards">Cards (${data.cards.length})</button>
@@ -1558,10 +1590,23 @@ async function renderWikiIndexPage() {
     </div>
 
     <div class="wiki-tab-panel" id="tab-recent">
-      <div class="section-label">Recently changed</div>
-      ${recentList(data.recentUpdated, 'updated_at')}
-      <div class="section-label" style="margin-top:20px">Recently added</div>
-      ${recentList(data.recentCreated, 'created_at')}
+      <div class="recent-subtabs">
+        <button class="recent-subtab active" data-subtab="changed">Changed</button>
+        <button class="recent-subtab" data-subtab="added">Added</button>
+        <button class="recent-subtab" data-subtab="podcast">Podcast</button>
+      </div>
+      <div class="recent-subpanel active" id="subtab-changed">
+        <div class="section-label">Recently changed</div>
+        ${recentList(data.recentUpdated, 'updated_at')}
+      </div>
+      <div class="recent-subpanel" id="subtab-added">
+        <div class="section-label">Recently added</div>
+        ${recentList(data.recentCreated, 'created_at')}
+      </div>
+      <div class="recent-subpanel" id="subtab-podcast">
+        <div class="section-label">Most podcast-linked</div>
+        ${podcastLinkList(data.mostPodcastLinked)}
+      </div>
     </div>
 
     <div class="wiki-tab-panel" id="tab-tags">
@@ -1617,6 +1662,15 @@ async function renderWikiIndexPage() {
     b.addEventListener('click', () => activateTab(b.dataset.tab));
   });
   activateTab((location.hash || '').replace('#', '') || 'index');
+
+  // Recent sub-tab switching
+  function activateRecentSubtab(name) {
+    document.querySelectorAll('.recent-subtab').forEach(b => b.classList.toggle('active', b.dataset.subtab === name));
+    document.querySelectorAll('.recent-subpanel').forEach(p => p.classList.toggle('active', p.id === `subtab-${name}`));
+  }
+  document.querySelectorAll('.recent-subtab').forEach(b => {
+    b.addEventListener('click', () => activateRecentSubtab(b.dataset.subtab));
+  });
 
   document.getElementById('wiki-filter').addEventListener('input', e => {
     document.getElementById('podcast-list').innerHTML = renderPodcasts(e.target.value);
