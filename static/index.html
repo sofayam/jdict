@@ -332,6 +332,7 @@
   /* Context list */
   .context-list { list-style: none; padding: 0; margin-bottom: 4px; }
   .context-list li { font-size: 12px; color: var(--muted); padding: 2px 0; }
+  .ctx-delete-btn { display: none; cursor: pointer; color: var(--red,#c00); background: none; border: none; font-size: 14px; padding: 0 4px; vertical-align: middle; line-height: 1; }
 
   /* Wiki tab bar */
   .wiki-tabs {
@@ -696,6 +697,8 @@ let currentQuery  = '';
 let currentOffset = 0;
 let debounceTimer = null;
 let searchEpoch   = 0;
+let wikiExistsMap = {};
+let wikiRedirectAttached = false;
 const LIMIT = 20;
 
 // Capture source context from the calling app (e.g. podcast player URL)
@@ -877,6 +880,25 @@ function makeDropZone(zone, initialFilename, onChange) {
     }
   }
 
+  async function importUrl(url) {
+    const prev = current;
+    showUploading();
+    try {
+      const res = await fetch('/api/wiki/image-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+      const { filename } = await res.json();
+      showImage(filename);
+      onChange?.();
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+      prev ? showImage(prev) : showEmpty();
+    }
+  }
+
   zone.addEventListener('click', () => zone.querySelector('input[type="file"]')?.click());
   zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
@@ -884,7 +906,9 @@ function makeDropZone(zone, initialFilename, onChange) {
     e.preventDefault();
     zone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file?.type.startsWith('image/')) upload(file);
+    if (file) { upload(file); return; }
+    const url = (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '').trim();
+    if (/^https?:\/\//i.test(url)) { importUrl(url); }
   });
 
   initialFilename ? showImage(initialFilename) : showEmpty();
@@ -909,6 +933,7 @@ async function doSearch(q, offset = 0) {
 }
 
 function renderSearchResults(data, q, offset) {
+  wikiExistsMap = {};
   if (!data.results?.length) {
     resultsDiv.innerHTML = '<div class="msg">No results</div>';
     paginationDiv.innerHTML = '';
@@ -922,7 +947,7 @@ function renderSearchResults(data, q, offset) {
   resultsDiv.innerHTML = data.results.map(e => `
     <div class="entry" data-slug="${slugify(primaryForm(e))}">
       <div class="entry-main-link">
-        <a class="entry-link" href="/entry/${e.seq}${podParams}">
+        <a class="entry-link" href="/entry/${e.seq}${podParams}" data-seq="${e.seq}">
           <div class="entry-head">
             <span class="kanji">${primaryForm(e)}</span>
             ${readingForm(e) ? `<span class="kana">${readingForm(e)}</span>` : ''}
@@ -940,6 +965,7 @@ function renderSearchResults(data, q, offset) {
     body: JSON.stringify({ slugs: data.results.map(e => slugify(primaryForm(e))) }),
   }).then(r => r.json()).then(exists => {
     if (searchEpoch !== epoch) return;
+    wikiExistsMap = exists;
     for (const [slug, info] of Object.entries(exists)) {
       if (!info.exists) continue;
       const head = resultsDiv.querySelector(`[data-slug="${slug}"] .entry-head`);
@@ -951,6 +977,37 @@ function renderSearchResults(data, q, offset) {
       }
     }
   });
+
+  if (!wikiRedirectAttached) {
+    wikiRedirectAttached = true;
+    resultsDiv.addEventListener('click', async (e) => {
+      const link = e.target.closest('.entry-link');
+      if (!link) return;
+      const entryDiv = link.closest('.entry');
+      if (!entryDiv) return;
+      const slug = entryDiv.dataset.slug;
+      if (!wikiExistsMap[slug]?.exists) return;
+      e.preventDefault();
+      if (podcastName) {
+        const seq = link.dataset.seq;
+        try {
+          const wikiRes = await fetch(`/api/wiki/word/${slug}`);
+          if (wikiRes.ok) {
+            const wikiData = await wikiRes.json();
+            const ctx = { source: pageSource || `entry:${seq}`, timestamp: new Date().toISOString(),
+                          podcast: podcastName, episode: podcastEp, podcastTimestamp: podcastTs };
+            const updated = { ...wikiData, contexts: [...(wikiData.contexts || []), ctx] };
+            await fetch(`/api/wiki/word/${slug}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updated),
+            });
+          }
+        } catch { /* best effort */ }
+      }
+      location.href = `/wiki/word/${slug}`;
+    });
+  }
 
   paginationDiv.innerHTML = '';
   if (offset > 0) {
@@ -1089,6 +1146,26 @@ async function renderWikiWordPage(slug) {
   const displayName = wiki.word || (entry ? primaryForm(entry) : slug);
   document.title = `${displayName} — jdict Wiki`;
 
+  const ctxItemHtml = (c, i) => {
+    const src = c.source || '';
+    const srcHtml = src.match(/^https?:\/\/|^\w+:\/\//)
+      ? `<a href="${src}" target="_blank">${src}</a>`
+      : src;
+    let podcastSuffix = '';
+    if (c.podcast) {
+      const epLabel = `${c.podcast} / ${c.episode}${c.podcastTimestamp ? ` @ ${c.podcastTimestamp}s` : ''}`;
+      const podcastPort = (window._jdictConfig || {}).podcastPort;
+      if (podcastPort) {
+        const epSeg = c.episode.replace(/\.mp3$/i, '').split('').map(ch => ch === '/' || ch.charCodeAt(0) > 127 ? ch : encodeURIComponent(ch)).join('');
+        const playUrl = `http://${window.location.hostname}:${podcastPort}/play${epSeg}?t=${c.podcastTimestamp}&from=wiki`;
+        podcastSuffix = ` — <a href="${playUrl}" target="_blank">${epLabel}</a>`;
+      } else {
+        podcastSuffix = ` — ${epLabel}`;
+      }
+    }
+    return `<li>${new Date(c.timestamp).toLocaleDateString()} — ${srcHtml}${podcastSuffix}<button type="button" class="ctx-delete-btn" data-idx="${i}" title="Remove this entry">×</button></li>`;
+  };
+
   resultsDiv.innerHTML = `
     <div class="entry-detail">
       <div class="entry-head">
@@ -1100,27 +1177,8 @@ async function renderWikiWordPage(slug) {
 
     ${wiki.contexts?.length ? `
       <div class="section-label">Lookup history</div>
-      <ul class="context-list">
-        ${wiki.contexts.map(c => {
-          const src = c.source || '';
-          const srcHtml = src.match(/^https?:\/\/|^\w+:\/\//)
-            ? `<a href="${src}" target="_blank">${src}</a>`
-            : src;
-          let podcastSuffix = '';
-          if (c.podcast) {
-            const epLabel = `${c.podcast} / ${c.episode}${c.podcastTimestamp ? ` @ ${c.podcastTimestamp}s` : ''}`;
-            const podcastPort = (window._jdictConfig || {}).podcastPort;
-            if (podcastPort) {
-              // Encode episode as a path segment: encode ASCII specials but leave Unicode readable
-              const epSeg = c.episode.replace(/\.mp3$/i, '').split('').map(ch => ch === '/' || ch.charCodeAt(0) > 127 ? ch : encodeURIComponent(ch)).join('');
-              const playUrl = `http://${window.location.hostname}:${podcastPort}/play${epSeg}?t=${c.podcastTimestamp}&from=wiki`;
-              podcastSuffix = ` — <a href="${playUrl}" target="_blank">${epLabel}</a>`;
-            } else {
-              podcastSuffix = ` — ${epLabel}`;
-            }
-          }
-          return `<li>${new Date(c.timestamp).toLocaleDateString()} — ${srcHtml}${podcastSuffix}</li>`;
-        }).join('')}
+      <ul class="context-list" id="context-list">
+        ${wiki.contexts.map((c, i) => ctxItemHtml(c, i)).join('')}
       </ul>
     ` : ''}
 
@@ -1170,6 +1228,7 @@ async function renderWikiWordPage(slug) {
     wikiForm.classList.toggle('view-mode', !on);
     editToggle.classList.toggle('active', on);
     document.getElementById('wiki-notes').readOnly = !on;
+    document.querySelectorAll('.ctx-delete-btn').forEach(b => b.style.display = on ? 'inline' : 'none');
   }
   editToggle.addEventListener('click', () => setEditMode(wikiForm.classList.contains('view-mode')));
 
@@ -1222,6 +1281,30 @@ async function renderWikiWordPage(slug) {
     await fetch(`/api/wiki/word/${encodeURIComponent(slug)}`, { method: 'DELETE' });
     history.pushState({}, '', '/');
     router();
+  });
+
+  // ── Context deletion ──────────────────────────────────────────────────────
+  function rebuildContextList() {
+    const listEl = document.getElementById('context-list');
+    if (!wiki.contexts?.length) {
+      const labelEl = listEl?.previousElementSibling;
+      labelEl?.remove();
+      listEl?.remove();
+      return;
+    }
+    if (listEl) {
+      listEl.innerHTML = wiki.contexts.map((c, i) => ctxItemHtml(c, i)).join('');
+      if (!wikiForm.classList.contains('view-mode')) {
+        listEl.querySelectorAll('.ctx-delete-btn').forEach(b => b.style.display = 'inline');
+      }
+    }
+  }
+  document.getElementById('context-list')?.addEventListener('click', e => {
+    const btn = e.target.closest('.ctx-delete-btn');
+    if (!btn) return;
+    wiki.contexts.splice(parseInt(btn.dataset.idx), 1);
+    rebuildContextList();
+    markDirty();
   });
 
   // ── Image actions ──────────────────────────────────────────────────────────
