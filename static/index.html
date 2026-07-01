@@ -120,6 +120,7 @@
   }
   .gloss:not(:last-child)::after { content: "; "; }
   .wiki-badge { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); padding: 1px 4px; border-radius: 2px; }
+  .img-badge { font-size: 10px; border: 1px solid var(--muted); padding: 1px 4px; border-radius: 2px; opacity: 0.5; }
   .s-inf { font-size: 12px; color: var(--muted); font-style: italic; }
 
   #pagination { display: flex; gap: 16px; padding: 20px 0; justify-content: center; }
@@ -939,10 +940,15 @@ function renderSearchResults(data, q, offset) {
     body: JSON.stringify({ slugs: data.results.map(e => slugify(primaryForm(e))) }),
   }).then(r => r.json()).then(exists => {
     if (searchEpoch !== epoch) return;
-    for (const [slug, has] of Object.entries(exists)) {
-      if (!has) continue;
+    for (const [slug, info] of Object.entries(exists)) {
+      if (!info.exists) continue;
       const head = resultsDiv.querySelector(`[data-slug="${slug}"] .entry-head`);
-      if (head) head.insertAdjacentHTML('beforeend', `<a class="wiki-badge" href="/wiki/word/${slug}">wiki</a>`);
+      if (head) {
+        const label = info.podcastCount > 0 ? `wiki (${info.podcastCount})` : 'wiki';
+        let badges = `<a class="wiki-badge" href="/wiki/word/${slug}">${label}</a>`;
+        if (info.hasImage) badges += `<span class="img-badge">🖼</span>`;
+        head.insertAdjacentHTML('beforeend', badges);
+      }
     }
   });
 

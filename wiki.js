@@ -477,6 +477,7 @@ module.exports = {
   slugify,
   getWordPage,
   wordExists,
+  getDb: getWikiDb,
   saveWordPage,
   getAllTags,
   getPopularTags,

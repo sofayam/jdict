@@ -345,8 +345,26 @@ app.get('/api/wiki/popular-tags', async (req, res) => {
 app.post('/api/wiki/exists', async (req, res) => {
   const { slugs } = req.body;
   if (!Array.isArray(slugs)) return res.status(400).json({ error: 'slugs must be an array' });
-  const pairs = await Promise.all(slugs.map(async s => [s, await wiki.wordExists(s)]));
-  res.json(Object.fromEntries(pairs));
+  const db = wiki.getDb();
+  const placeholders = slugs.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT slug, image,
+      (SELECT COUNT(*) FROM json_each(contexts) AS ctx
+       WHERE json_extract(ctx.value, '$.podcast') IS NOT NULL) AS podcast_count
+    FROM wiki_words WHERE slug IN (${placeholders})
+  `).all(...slugs);
+  const result = {};
+  const found = new Set();
+  for (const row of rows) {
+    result[row.slug] = { exists: true, podcastCount: row.podcast_count, hasImage: !!row.image };
+    found.add(row.slug);
+  }
+  for (const slug of slugs) {
+    if (!found.has(slug)) {
+      result[slug] = { exists: false, podcastCount: 0 };
+    }
+  }
+  res.json(result);
 });
 
 app.get('/api/wiki/word/:word', async (req, res) => {
